@@ -23,5 +23,5 @@ setup(
     packages=find_packages(),
     include_package_data=True,
     platforms="any",
-    install_requires=["numpy"]  # 这个项目需要的第三方库
+    install_requires=["numpy","prettytable","pyyaml","funcsigs","pillow","scipy","rarfile","nltk","requests","objgraph","protobuf","six"]  # 这个项目需要的第三方库
 )
