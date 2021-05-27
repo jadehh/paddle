@@ -12,7 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .framework import Program, program_guard, unique_name, cuda_places
+import os
+import paddle
+from .framework import Program, program_guard, unique_name, cuda_places, cpu_places
 from .param_attr import ParamAttr
 from .initializer import Constant
 from . import layers
@@ -43,11 +45,26 @@ class SimpleLayer(Layer):
 
 
 def run_check():
-    ''' install check to verify if install is success
-
+    """To check whether install is successful
     This func should not be called only if you need to verify installation
-    '''
-    print("Running Verify Paddle Program ... ")
+
+    Examples:
+        .. code-block:: python
+
+            import paddle.fluid as fluid
+            fluid.install_check.run_check()
+
+            # If installed successfully, output may be
+            # Running Verify Fluid Program ... 
+            # W0805 04:24:59.496919 35357 device_context.cc:268] Please NOTE: device: 0, CUDA Capability: 70, Driver API Version: 10.2, Runtime API Version: 10.1
+            # W0805 04:24:59.505594 35357 device_context.cc:276] device: 0, cuDNN Version: 7.6.
+            # Your Paddle Fluid works well on SINGLE GPU or CPU.
+            # Your Paddle Fluid works well on MUTIPLE GPU or CPU.
+            # Your Paddle Fluid is installed successfully! Let's start deep Learning with Paddle Fluid now
+    """
+    paddle.enable_static()
+
+    print("Running Verify Fluid Program ... ")
 
     device_list = []
     if core.is_compiled_with_cuda():
@@ -55,7 +72,7 @@ def run_check():
             core.get_cuda_device_count()
         except Exception as e:
             logging.warning(
-                "You are using GPU version Paddle, But Your CUDA Device is not set properly"
+                "You are using GPU version Paddle Fluid, But Your CUDA Device is not set properly"
                 "\n Original Error is {}".format(e))
             return 0
         device_list = cuda_places()
@@ -83,7 +100,7 @@ def run_check():
                     out = simple_layer(inp)
                     exe = executor.Executor(
                         core.CUDAPlace(0) if core.is_compiled_with_cuda() and
-                                             (core.get_cuda_device_count() > 0) else core.CPUPlace())
+                        (core.get_cuda_device_count() > 0) else core.CPUPlace())
                     loss = layers.mean(out)
                     loss.persistable = True
                     optimizer.SGD(learning_rate=0.01).minimize(loss)
@@ -115,23 +132,23 @@ def run_check():
                         parameter_list=[simple_layer0._linear1.weight.name])[0]
                     exe0 = executor.Executor(
                         core.CUDAPlace(0) if core.is_compiled_with_cuda() and
-                                             (core.get_cuda_device_count() > 0) else core.CPUPlace())
+                        (core.get_cuda_device_count() > 0) else core.CPUPlace())
                     exe0.run(startup_prog)
                     exe0.run(feed={inp0.name: np_inp_single},
                              fetch_list=[out0.name, param_grads[1].name])
 
     test_simple_exe()
 
-    print("Your Paddle works well on SINGLE GPU or CPU.")
+    print("Your Paddle Fluid works well on SINGLE GPU or CPU.")
     try:
         test_parallerl_exe()
-        print("Your Paddle works well on MUTIPLE GPU or CPU.")
+        print("Your Paddle Fluid works well on MUTIPLE GPU or CPU.")
         print(
-            "Your Paddle is installed successfully! Let's start deep Learning with Paddle now"
+            "Your Paddle Fluid is installed successfully! Let's start deep Learning with Paddle Fluid now"
         )
     except Exception as e:
         logging.warning(
-            "Your Paddle has some problem with multiple GPU. This may be caused by:"
+            "Your Paddle Fluid has some problem with multiple GPU. This may be caused by:"
             "\n 1. There is only 1 or 0 GPU visible on your Device;"
             "\n 2. No.1 or No.2 GPU or both of them are occupied now"
             "\n 3. Wrong installation of NVIDIA-NCCL2, please follow instruction on https://github.com/NVIDIA/nccl-tests "
@@ -140,5 +157,7 @@ def run_check():
 
         print("\n Original Error is: {}".format(e))
         print(
-            "Your Paddle is installed successfully ONLY for SINGLE GPU or CPU! "
-            "\n Let's start deep Learning with Paddle now")
+            "Your Paddle Fluid is installed successfully ONLY for SINGLE GPU or CPU! "
+            "\n Let's start deep Learning with Paddle Fluid now")
+
+    paddle.disable_static()

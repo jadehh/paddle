@@ -19,7 +19,7 @@ DESCRIPTOR = _descriptor.FileDescriptor(
   name='profiler.proto',
   package='paddle.platform.proto',
   syntax='proto2',
-  serialized_pb=_b('\n\x0eprofiler.proto\x12\x15paddle.platform.proto\"\x18\n\x07MemCopy\x12\r\n\x05\x62ytes\x18\x01 \x01(\x04\"\x82\x02\n\x05\x45vent\x12\x34\n\x04type\x18\x08 \x01(\x0e\x32&.paddle.platform.proto.Event.EventType\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x10\n\x08start_ns\x18\x02 \x01(\x04\x12\x0e\n\x06\x65nd_ns\x18\x03 \x01(\x04\x12\x11\n\tdevice_id\x18\x05 \x01(\x03\x12\x15\n\rsub_device_id\x18\x06 \x01(\x03\x12/\n\x07memcopy\x18\x07 \x01(\x0b\x32\x1e.paddle.platform.proto.MemCopy\x12\x13\n\x0b\x64\x65tail_info\x18\t \x01(\t\"#\n\tEventType\x12\x07\n\x03\x43PU\x10\x00\x12\r\n\tGPUKernel\x10\x01\"\xf5\x01\n\x08MemEvent\x12\x10\n\x08start_ns\x18\x01 \x01(\x04\x12\x0e\n\x06\x65nd_ns\x18\x02 \x01(\x04\x12\r\n\x05\x62ytes\x18\x03 \x01(\x04\x12\x34\n\x05place\x18\x04 \x01(\x0e\x32%.paddle.platform.proto.MemEvent.Place\x12\x11\n\tthread_id\x18\x05 \x01(\x04\x12\x11\n\tdevice_id\x18\x06 \x01(\r\x12\x10\n\x08\x61lloc_in\x18\x07 \x01(\t\x12\x0f\n\x07\x66ree_in\x18\x08 \x01(\t\"9\n\x05Place\x12\r\n\tCUDAPlace\x10\x00\x12\x0c\n\x08\x43PUPlace\x10\x01\x12\x13\n\x0f\x43UDAPinnedPlace\x10\x02\"\x8e\x01\n\x07Profile\x12,\n\x06\x65vents\x18\x01 \x03(\x0b\x32\x1c.paddle.platform.proto.Event\x12\x10\n\x08start_ns\x18\x02 \x01(\x04\x12\x0e\n\x06\x65nd_ns\x18\x03 \x01(\x04\x12\x33\n\nmem_events\x18\x04 \x03(\x0b\x32\x1f.paddle.platform.proto.MemEvent')
+  serialized_pb=_b('\n\x0eprofiler.proto\x12\x15paddle.platform.proto\"\x18\n\x07MemCopy\x12\r\n\x05\x62ytes\x18\x01 \x01(\x04\"\x91\x02\n\x05\x45vent\x12\x34\n\x04type\x18\x08 \x01(\x0e\x32&.paddle.platform.proto.Event.EventType\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x10\n\x08start_ns\x18\x02 \x01(\x04\x12\x0e\n\x06\x65nd_ns\x18\x03 \x01(\x04\x12\x11\n\tdevice_id\x18\x05 \x01(\x03\x12\x15\n\rsub_device_id\x18\x06 \x01(\x03\x12/\n\x07memcopy\x18\x07 \x01(\x0b\x32\x1e.paddle.platform.proto.MemCopy\x12\x13\n\x0b\x64\x65tail_info\x18\t \x01(\t\"2\n\tEventType\x12\x07\n\x03\x43PU\x10\x00\x12\r\n\tGPUKernel\x10\x01\x12\r\n\tNPUKernel\x10\x02\"\x91\x02\n\x08MemEvent\x12\x10\n\x08start_ns\x18\x01 \x01(\x04\x12\x0e\n\x06\x65nd_ns\x18\x02 \x01(\x04\x12\r\n\x05\x62ytes\x18\x03 \x01(\x04\x12\x34\n\x05place\x18\x04 \x01(\x0e\x32%.paddle.platform.proto.MemEvent.Place\x12\x11\n\tthread_id\x18\x05 \x01(\x04\x12\x11\n\tdevice_id\x18\x06 \x01(\r\x12\x10\n\x08\x61lloc_in\x18\x07 \x01(\t\x12\x0f\n\x07\x66ree_in\x18\x08 \x01(\t\"U\n\x05Place\x12\r\n\tCUDAPlace\x10\x00\x12\x0c\n\x08\x43PUPlace\x10\x01\x12\x13\n\x0f\x43UDAPinnedPlace\x10\x02\x12\x0c\n\x08XPUPlace\x10\x03\x12\x0c\n\x08NPUPlace\x10\x04\"\x8e\x01\n\x07Profile\x12,\n\x06\x65vents\x18\x01 \x03(\x0b\x32\x1c.paddle.platform.proto.Event\x12\x10\n\x08start_ns\x18\x02 \x01(\x04\x12\x0e\n\x06\x65nd_ns\x18\x03 \x01(\x04\x12\x33\n\nmem_events\x18\x04 \x03(\x0b\x32\x1f.paddle.platform.proto.MemEvent')
 )
 _sym_db.RegisterFileDescriptor(DESCRIPTOR)
 
@@ -39,11 +39,15 @@ _EVENT_EVENTTYPE = _descriptor.EnumDescriptor(
       name='GPUKernel', index=1, number=1,
       options=None,
       type=None),
+    _descriptor.EnumValueDescriptor(
+      name='NPUKernel', index=2, number=2,
+      options=None,
+      type=None),
   ],
   containing_type=None,
   options=None,
   serialized_start=291,
-  serialized_end=326,
+  serialized_end=341,
 )
 _sym_db.RegisterEnumDescriptor(_EVENT_EVENTTYPE)
 
@@ -65,11 +69,19 @@ _MEMEVENT_PLACE = _descriptor.EnumDescriptor(
       name='CUDAPinnedPlace', index=2, number=2,
       options=None,
       type=None),
+    _descriptor.EnumValueDescriptor(
+      name='XPUPlace', index=3, number=3,
+      options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='NPUPlace', index=4, number=4,
+      options=None,
+      type=None),
   ],
   containing_type=None,
   options=None,
-  serialized_start=517,
-  serialized_end=574,
+  serialized_start=532,
+  serialized_end=617,
 )
 _sym_db.RegisterEnumDescriptor(_MEMEVENT_PLACE)
 
@@ -182,7 +194,7 @@ _EVENT = _descriptor.Descriptor(
   oneofs=[
   ],
   serialized_start=68,
-  serialized_end=326,
+  serialized_end=341,
 )
 
 
@@ -262,8 +274,8 @@ _MEMEVENT = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=329,
-  serialized_end=574,
+  serialized_start=344,
+  serialized_end=617,
 )
 
 
@@ -314,8 +326,8 @@ _PROFILE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=577,
-  serialized_end=719,
+  serialized_start=620,
+  serialized_end=762,
 )
 
 _EVENT.fields_by_name['type'].enum_type = _EVENT_EVENTTYPE

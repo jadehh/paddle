@@ -98,10 +98,71 @@ def cuda_profiler(output_file, output_mode=None, config=None):
     core.nvprof_init(output_file, output_mode, config_file)
     # Enables profiler collection by the active CUDA profiling tool.
     core.nvprof_start()
-    yield
+    try:
+        yield
     # Disables profiler collection.
-    core.nvprof_stop()
-    os.remove(config_file)
+    finally:
+        core.nvprof_stop()
+        os.remove(config_file)
+
+
+@signature_safe_contextmanager
+def npu_profiler(output_file, config=None):
+    """
+    The NPU profiler.
+    
+    This fuctions is used to profile NPU program by NPU runtime application
+    programming interface. The profiling result will be written into
+    `output_file`. The users can set set the NPU profiling config by `config` argument. 
+    
+    After getting the profiling result file, users can use 
+    `tools provided by Ascend <https://support.huaweicloud.com/tg-Inference-cann/atlasprofiling_16_0006.html>`_ 
+    to load this output file to visualize results.
+
+    Args:
+        output_file (str) : The output file name, the result will be
+            written into this file. It should be absolute path. 
+        config (list<str>, optional) : NPU profile config. For more details, please
+            refer to `User Guide <https://support.huaweicloud.com/tg-Inference-cann/atlasprofiling_16_0006.html>`_ .
+
+    Examples:
+
+        .. code-block:: python
+
+            import paddle.fluid as fluid
+            import paddle.fluid.profiler as profiler
+            import numpy as np
+
+            epoc = 8
+            dshape = [4, 3, 28, 28]
+            data = fluid.data(name='data', shape=[None, 3, 28, 28], dtype='float32')
+            conv = fluid.layers.conv2d(data, 20, 3, stride=[1, 1], padding=[1, 1])
+
+            place = fluid.NPUPlace(0)
+            exe = fluid.Executor(place)
+            exe.run(fluid.default_startup_program())
+
+            output_file = 'npu.txt'
+            with profiler.npu_profiler(output_file) as npu_prof:
+                for i in range(epoc):
+                    input = np.random.random(dshape).astype('float32')
+                    exe.run(fluid.default_main_program(), feed={'data': input})
+            # then use  NPU profiler tools to load this output file
+            # to visualize results.
+    """
+    # TODO: support config in python.
+    if not config:
+        config = core.npu_prof_create_config()
+
+    core.npu_prof_init(output_file)
+    # Enables profiler collection by the active NPU profiling tool.
+    core.npu_prof_start(config)
+    try:
+        yield
+    # Disables profiler collection.
+    finally:
+        core.npu_prof_stop(config)
+        core.npu_prof_finalize()
 
 
 def reset_profiler():
@@ -126,7 +187,7 @@ def reset_profiler():
     core.reset_profiler()
 
 
-def start_profiler(state):
+def start_profiler(state, tracer_option='Default'):
     """
     Enable the profiler. Uers can use `fluid.profiler.start_profiler` and
     `fluid.profiler.stop_profiler` to profile, which is equal to the usage 
@@ -137,9 +198,15 @@ def start_profiler(state):
             or 'All'. 'CPU' means only profiling CPU; 'GPU' means profiling
             both CPU and GPU; 'All' means profiling both CPU and GPU, and 
             generates timeline as well.
+        tracer_option (str, optional) : tracer_option can be one of ['Default', 'OpDetail', 'AllOpDetail'], it
+            can control the profile level and print the different level profile result. `Default` option print 
+            the different Op type profiling result and the `OpDetail` option print the detail profiling 
+            result of different op types such as compute and data transform, `AllOpDetail` option 
+            print the detail profiling result of different op name same as `OpDetail`.
 
     Raises:
-        ValueError: If `state` is not in ['CPU', 'GPU', 'All'].
+        ValueError: If `state` is not in ['CPU', 'GPU', 'All'] or `tracer_option` 
+            is not in ['Default', 'OpDetail', 'AllOpDetail'].
 
     Examples:
 
@@ -149,6 +216,13 @@ def start_profiler(state):
             import paddle.fluid.profiler as profiler
 
             profiler.start_profiler('GPU')
+            for iter in range(10):
+                if iter == 2:
+                    profiler.reset_profiler()
+                # except each iteration
+            profiler.stop_profiler('total', '/tmp/profile')
+            
+            profiler.start_profiler('GPU', "OpDetail")
             for iter in range(10):
                 if iter == 2:
                     profiler.reset_profiler()
@@ -165,6 +239,18 @@ def start_profiler(state):
         prof_state = core.ProfilerState.kCPU
     else:
         prof_state = core.ProfilerState.kAll
+
+    if tracer_option not in ['Default', 'OpDetail', 'AllOpDetail']:
+        raise ValueError(
+            "tracer option must be 'Default', 'OpDetail', 'AllOpDetail'.")
+    if tracer_option == "Default":
+        prof_tracer_option = core.TracerOption.kDefault
+    elif tracer_option == "OpDetail":
+        prof_tracer_option = core.TracerOption.kOpDetail
+    else:
+        prof_tracer_option = core.TracerOption.kAllOpDetail
+
+    core.set_tracer_option(prof_tracer_option)
     core.enable_profiler(prof_state)
 
 
@@ -184,8 +270,8 @@ def stop_profiler(sorted_key=None, profile_path='/tmp/profile'):
             The `max` means sorting by the maximum execution time.
             The `min` means sorting by the minimum execution time.
             The `ave` means sorting by the average execution time.
-        profile_path (str, optional) : If state == 'All', it will generate timeline,
             and write it into `profile_path`. The default profile_path is `/tmp/profile`. 
+        profile_path (str, optional) : If state == 'All', it will generate timeline,
 
     Raises:
         ValueError: If `sorted_key` is not in
@@ -225,7 +311,10 @@ def stop_profiler(sorted_key=None, profile_path='/tmp/profile'):
 
 
 @signature_safe_contextmanager
-def profiler(state, sorted_key=None, profile_path='/tmp/profile'):
+def profiler(state,
+             sorted_key=None,
+             profile_path='/tmp/profile',
+             tracer_option='Default'):
     """
     The profiler interface. Different from `fluid.profiler.cuda_profiler`, 
     this profiler can be used to profile both CPU and GPU program.
@@ -246,6 +335,11 @@ def profiler(state, sorted_key=None, profile_path='/tmp/profile'):
             The `ave` means sorting by the average execution time.
         profile_path (str, optional) : If state == 'All', it will generate timeline,
             and write it into `profile_path`. The default profile_path is `/tmp/profile`. 
+        tracer_option (str, optional) : tracer_option can be one of ['Default', 'OpDetail', 'AllOpDetail'], it
+            can control the profile level and print the different level profile result. `Default` option print 
+            the different Op type profiling result and the `OpDetail` option print the detail profiling 
+            result of different op types such as compute and data transform, `AllOpDetail` option 
+            print the detail profiling result of different op name same as `OpDetail`.
 
     Raises:
         ValueError: If `state` is not in ['CPU', 'GPU', 'All']. If `sorted_key` is
@@ -268,7 +362,7 @@ def profiler(state, sorted_key=None, profile_path='/tmp/profile'):
             exe = fluid.Executor(place)
             exe.run(fluid.default_startup_program())
 
-            with profiler.profiler('CPU', 'total', '/tmp/profile') as prof:
+            with profiler.profiler('CPU', 'total', '/tmp/profile', 'Default') as prof:
                 for i in range(epoc):
                     input = np.random.random(dshape).astype('float32')
                     exe.run(fluid.default_main_program(), feed={'data': input})
@@ -311,6 +405,8 @@ def profiler(state, sorted_key=None, profile_path='/tmp/profile'):
             thread0::conv2d             8           7.93456     0.291385    5.63342     0.99182     0.795243
             thread0::elementwise_add    8           1.96555     0.191884    0.518004    0.245693    0.196998
     """
-    start_profiler(state)
-    yield
-    stop_profiler(sorted_key, profile_path)
+    start_profiler(state, tracer_option)
+    try:
+        yield
+    finally:
+        stop_profiler(sorted_key, profile_path)

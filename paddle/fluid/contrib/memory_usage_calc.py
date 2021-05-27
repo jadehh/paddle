@@ -22,8 +22,10 @@ This API is still under active development and may change drastically.
 
 from __future__ import print_function
 
+import six
+
 from .. import core
-from ..framework import Program
+from ..framework import Program, Variable
 
 __all__ = ['memory_usage']
 
@@ -42,7 +44,7 @@ DEBUG = False
 
 
 def memory_usage(program, batch_size):
-    """
+    r"""
     Get the estimate memory usage of program with input batch size.
 
     Args:

@@ -17,12 +17,14 @@ All layers just related to metric.
 
 from __future__ import print_function
 
+import warnings
 from ..layer_helper import LayerHelper
-from ..initializer import Constant
+from ..initializer import Normal, Constant
 from ..framework import Variable, in_dygraph_mode, _varbase_creator
 from .. import core
+from ..param_attr import ParamAttr
 from . import nn
-from ..data_feeder import check_type_and_dtype
+from ..data_feeder import check_variable_and_dtype
 
 __all__ = ['accuracy', 'auc']
 
@@ -50,56 +52,51 @@ def accuracy(input, label, k=1, correct=None, total=None):
     Examples:
         .. code-block:: python
 
-            import paddle.fluid as fluid
             import numpy as np
 
-            data = fluid.data(name="input", shape=[-1, 32, 32], dtype="float32")
-            label = fluid.data(name="label", shape=[-1,1], dtype="int")
-            fc_out = fluid.layers.fc(input=data, size=10)
-            predict = fluid.layers.softmax(input=fc_out)
-            result = fluid.layers.accuracy(input=predict, label=label, k=5)
+            import paddle
+            import paddle.static as static
+            import paddle.nn.functional as F
 
-            place = fluid.CPUPlace()
-            exe = fluid.Executor(place)
+            paddle.enable_static()
+            data = static.data(name="input", shape=[-1, 32, 32], dtype="float32")
+            label = static.data(name="label", shape=[-1,1], dtype="int")
+            fc_out = static.nn.fc(x=data, size=10)
+            predict = F.softmax(x=fc_out)
+            result = static.accuracy(input=predict, label=label, k=5)
 
-            exe.run(fluid.default_startup_program())
+            place = paddle.CPUPlace()
+            exe = static.Executor(place)
+
+            exe.run(static.default_startup_program())
             x = np.random.rand(3, 32, 32).astype("float32")
             y = np.array([[1],[0],[1]])
             output= exe.run(feed={"input": x,"label": y},
-                             fetch_list=[result[0]])
+                        fetch_list=[result[0]])
             print(output)
 
-            #[array([0.6666667], dtype=float32)]
+            #[array([0.], dtype=float32)]
     """
     if in_dygraph_mode():
-        topk_out, topk_indices = nn.topk(input, k=k)
-        inputs = {
-            "Out": [topk_out],
-            "Indices": [topk_indices],
-            "Label": [label]
-        }
-        acc_out = _varbase_creator(dtype="float32")
         if correct is None:
-            correct = _varbase_creator(dtype="int64")
+            correct = _varbase_creator(dtype="int32")
         if total is None:
-            total = _varbase_creator(dtype="int64")
-        outputs = {
-            "Accuracy": [acc_out],
-            "Correct": [correct],
-            "Total": [total]
-        }
-        outs = core.ops.accuracy(inputs, {}, outputs)
-        return outs['Accuracy'][0]
+            total = _varbase_creator(dtype="int32")
+
+        topk_out, topk_indices = nn.topk(input, k=k)
+        _acc, _, _ = core.ops.accuracy(topk_out, topk_indices, label, correct,
+                                       total)
+        return _acc
 
     helper = LayerHelper("accuracy", **locals())
-    check_type_and_dtype(input, 'input', Variable,
-                         ['float16', 'float32', 'float64'], 'accuracy')
+    check_variable_and_dtype(input, 'input', ['float16', 'float32', 'float64'],
+                             'accuracy')
     topk_out, topk_indices = nn.topk(input, k=k)
     acc_out = helper.create_variable_for_type_inference(dtype="float32")
     if correct is None:
-        correct = helper.create_variable_for_type_inference(dtype="int64")
+        correct = helper.create_variable_for_type_inference(dtype="int32")
     if total is None:
-        total = helper.create_variable_for_type_inference(dtype="int64")
+        total = helper.create_variable_for_type_inference(dtype="int32")
     helper.append_op(
         type="accuracy",
         inputs={
@@ -121,7 +118,7 @@ def auc(input,
         num_thresholds=2**12 - 1,
         topk=1,
         slide_steps=1):
-    """
+    r"""
     **Area Under the Curve (AUC) Layer**
 
     This implementation computes the AUC according to forward output and label.
@@ -161,27 +158,33 @@ def auc(input,
     Examples:
         .. code-block:: python
 
-            import paddle.fluid as fluid
             import numpy as np
 
-            data = fluid.data(name="input", shape=[-1, 32,32], dtype="float32")
-            label = fluid.data(name="label", shape=[-1], dtype="int")
-            fc_out = fluid.layers.fc(input=data, size=2)
-            predict = fluid.layers.softmax(input=fc_out)
-            result=fluid.layers.auc(input=predict, label=label)
+            import paddle
+            import paddle.static as static
+            import paddle.nn.functional as F
 
-            place = fluid.CPUPlace()
-            exe = fluid.Executor(place)
+            paddle.enable_static()
+            data = static.data(name="input", shape=[-1, 32,32], dtype="float32")
+            label = static.data(name="label", shape=[-1], dtype="int")
+            fc_out = static.nn.fc(x=data, size=2)
+            predict = F.softmax(x=fc_out)
+            result = static.auc(input=predict, label=label)
 
-            exe.run(fluid.default_startup_program())
+            place = paddle.CPUPlace()
+            exe = static.Executor(place)
+
+            exe.run(static.default_startup_program())
             x = np.random.rand(3,32,32).astype("float32")
             y = np.array([1,0,1])
             output= exe.run(feed={"input": x,"label": y},
-                             fetch_list=[result[0]])
+                        fetch_list=[result[0]])
             print(output)
-            #[array([0.5])]
+            #[array([0.])]
     """
     helper = LayerHelper("auc", **locals())
+    check_variable_and_dtype(input, 'input', ['float32', 'float64'], 'auc')
+    check_variable_and_dtype(label, 'label', ['int32', 'int64'], 'auc')
     auc_out = helper.create_variable_for_type_inference(dtype="float64")
     batch_auc_out = helper.create_variable_for_type_inference(dtype="float64")
     # make tp, tn, fp, fn persistable, so that can accumulate all batches.
