@@ -23,5 +23,5 @@ setup(
     packages=find_packages(),
     include_package_data=True,
     platforms="any",
-    install_requires=["decorator","six","numpy","protobuf","requests","pillow","gast","astor"]  # 这个项目需要的第三方库
+    install_requires=["rarfile","objgraph"]  # 这个项目需要的第三方库
 )
