@@ -10,7 +10,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="paddle",
-    version="2.1",
+    version="1.8",
     keywords=("pip", "paddle", ""),
     description="paddle",
     long_description="xxx",
@@ -23,5 +23,5 @@ setup(
     packages=find_packages(),
     include_package_data=True,
     platforms="any",
-    install_requires=["rarfile","objgraph"]  # 这个项目需要的第三方库
+    install_requires=["numpy","prettytable","pyyaml","funcsigs","pillow","scipy","rarfile","nltk","requests","objgraph","protobuf","six","decorator","shapely","pyclipper"]  # 这个项目需要的第三方库
 )
