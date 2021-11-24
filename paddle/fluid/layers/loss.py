@@ -15,11 +15,13 @@
 from __future__ import print_function
 
 import numpy as np
+from functools import partial, reduce
 from . import nn
 from .layer_function_generator import templatedoc
 from ..layer_helper import LayerHelper
 from ..framework import Variable, in_dygraph_mode
-from ..data_feeder import check_type_and_dtype
+from .. import core
+from ..data_feeder import check_variable_and_dtype, check_type
 from ..param_attr import ParamAttr
 from ..initializer import NumpyArrayInitializer, Constant
 from .. import core
@@ -175,6 +177,8 @@ def bpr_loss(input, label, name=None):
     """
     helper = LayerHelper('bpr_loss', **locals())
     out = helper.create_variable_for_type_inference(dtype=input.dtype)
+    check_variable_and_dtype(input, 'input', ['float16', 'float32', 'float64'],
+                             'bpr_loss')
     helper.append_op(
         type='bpr_loss',
         inputs={'X': [input],
@@ -236,15 +240,15 @@ def cross_entropy(input, label, soft_label=False, ignore_index=kIgnoreIndex):
     if not soft_label:
         return cross_entropy2(input, label, ignore_index)
 
+    if in_dygraph_mode():
+        return core.ops.cross_entropy(input, label, "soft_label", soft_label,
+                                      "ignore_index", ignore_index)
+
     inputs = {'X': [input], 'Label': [label]}
     attrs = {"soft_label": soft_label, "ignore_index": ignore_index}
 
-    if in_dygraph_mode():
-        outs = core.ops.cross_entropy(inputs, attrs)
-        return outs['Y'][0]
-
-    check_type_and_dtype(input, 'input', Variable,
-                         ['float16', 'float32', 'float64'], 'cross_entropy')
+    check_variable_and_dtype(input, 'input', ['float16', 'float32', 'float64'],
+                             'cross_entropy')
     helper = LayerHelper('cross_entropy', **locals())
     out = helper.create_variable_for_type_inference(dtype=input.dtype)
     helper.append_op(
@@ -253,15 +257,15 @@ def cross_entropy(input, label, soft_label=False, ignore_index=kIgnoreIndex):
 
 
 def cross_entropy2(input, label, ignore_index=kIgnoreIndex):
+    if in_dygraph_mode():
+        loss, _, _ = core.ops.cross_entropy2(input, label, 'ignore_index',
+                                             ignore_index)
+        return loss
+
     inputs = {'X': [input], 'Label': [label]}
     attrs = {'ignore_index': ignore_index}
-
-    if in_dygraph_mode():
-        outs = core.ops.cross_entropy2(inputs, attrs)
-        return outs['Y'][0]
-
-    check_type_and_dtype(input, 'input', Variable,
-                         ['float16', 'float32', 'float64'], 'cross_entropy2')
+    check_variable_and_dtype(input, 'input', ['float16', 'float32', 'float64'],
+                             'cross_entropy2')
     helper = LayerHelper('cross_entropy2', **locals())
     out = helper.create_variable_for_type_inference(dtype=input.dtype)
     xshape = helper.create_variable_for_type_inference(dtype=input.dtype)
@@ -332,6 +336,10 @@ def square_error_cost(input, label):
 	        
 	        # [0.04000002]
     """
+    check_variable_and_dtype(input, "input", ['float32', 'float64'],
+                             'square_error_cost')
+    check_variable_and_dtype(label, "label", ['float32', 'float64'],
+                             'square_error_cost')
     helper = LayerHelper('square_error_cost', **locals())
     minus_out = helper.create_variable_for_type_inference(dtype=input.dtype)
     helper.append_op(
@@ -445,6 +453,8 @@ def edit_distance(input,
             # [4]
 
     """
+    check_variable_and_dtype(input, 'input', ['int64'], 'edit_distance')
+    check_variable_and_dtype(label, 'label', ['int64'], 'edit_distance')
     helper = LayerHelper("edit_distance", **locals())
 
     # remove some tokens from input and labels
@@ -467,7 +477,7 @@ def edit_distance(input,
         label = erased_label
 
     this_inputs = {"Hyps": [input], "Refs": [label]}
-    if input_length and label_length:
+    if input_length is not None and label_length is not None:
         this_inputs['HypsLength'] = [input_length]
         this_inputs['RefsLength'] = [label_length]
 
@@ -604,8 +614,14 @@ def warpctc(input,
             print(output)
     """
     helper = LayerHelper('warpctc', **locals())
+    check_variable_and_dtype(input, 'input', ['float32'], "warpctc")
+    check_variable_and_dtype(label, 'label', ['int32'], "warpctc")
     this_inputs = {'Logits': [input], 'Label': [label]}
-    if input_length and label_length:
+    if input_length is not None and label_length is not None:
+        check_variable_and_dtype(input_length, 'LogitsLength', ['int64'],
+                                 "warpctc")
+        check_variable_and_dtype(label_length, 'LabelLength', ['int64'],
+                                 "warpctc")
         this_inputs['LogitsLength'] = [input_length]
         this_inputs['LabelLength'] = [label_length]
 
@@ -715,9 +731,8 @@ def nce(input,
                        custom_dist=dist)
     """
     helper = LayerHelper('nce', **locals())
-    check_type_and_dtype(input, 'input', Variable, ['float32', 'float64'],
-                         'nce')
-    check_type_and_dtype(label, 'label', Variable, ['int64'], 'nce')
+    check_variable_and_dtype(input, 'input', ['float32', 'float64'], 'nce')
+    check_variable_and_dtype(label, 'label', ['int64'], 'nce')
 
     dim = input.shape[1]
     num_true_class = label.shape[1]
@@ -922,6 +937,8 @@ def hsigmoid(input,
                 value=0.05), bias_attr=fluid.initializer.Constant(value=.0))
             # out = [[0.62792355], [0.62792355], [0.62792355], [0.62792355]]
     """
+    check_variable_and_dtype(input, 'input', ['float32', 'float64'], 'hsigmoid')
+    check_variable_and_dtype(label, 'label', ['int64'], 'hsigmoid')
 
     helper = LayerHelper('hierarchical_sigmoid', **locals())
     dtype = helper.input_dtype()
@@ -1232,21 +1249,22 @@ def softmax_with_cross_entropy(logits,
             out = fluid.layers.softmax_with_cross_entropy(
                 logits=fc, label=label)
     """
+    if in_dygraph_mode():
+        softmax, loss = core.ops.softmax_with_cross_entropy(
+            logits, label, 'soft_label', soft_label, 'ignore_index',
+            ignore_index, 'numeric_stable_mode', numeric_stable_mode, 'axis',
+            axis)
+        if not return_softmax:
+            return loss
+        else:
+            return loss, softmax
+
     attrs = {
         'soft_label': soft_label,
         'ignore_index': ignore_index,
         'numeric_stable_mode': numeric_stable_mode,
         'axis': axis
     }
-
-    if in_dygraph_mode():
-        inputs = {'Logits': [logits], 'Label': [label]}
-        outs = core.ops.softmax_with_cross_entropy(inputs, attrs)
-        if not return_softmax:
-            return outs['Loss'][0]
-        else:
-            return outs['Loss'][0], outs['Softmax'][0]
-
     helper = LayerHelper('softmax_with_cross_entropy', **locals())
     softmax = helper.create_variable_for_type_inference(dtype=logits.dtype)
     loss = helper.create_variable_for_type_inference(dtype=logits.dtype)
@@ -1309,15 +1327,9 @@ def rank_loss(label, left, right, name=None):
 
     """
     helper = LayerHelper('rank_loss', **locals())
-
-    if not (isinstance(label, Variable)):
-        raise ValueError("The label should be a Variable")
-
-    if not (isinstance(left, Variable)):
-        raise ValueError("The left should be a Variable")
-
-    if not (isinstance(right, Variable)):
-        raise ValueError("The right should be a Variable")
+    check_variable_and_dtype(label, 'label', ['float32'], "rank_loss")
+    check_variable_and_dtype(left, 'left', ['float32'], "rank_loss")
+    check_variable_and_dtype(right, 'right', ['float32'], "rank_loss")
 
     out = helper.create_variable_for_type_inference("float32")
 
@@ -1366,12 +1378,9 @@ def margin_rank_loss(label, left, right, margin=0.1, name=None):
            out = fluid.layers.margin_rank_loss(label, left, right)
     """
     helper = LayerHelper('margin_rank_loss', **locals())
-    if not isinstance(label, Variable):
-        raise ValueError("The label should be a Variable.")
-    if not isinstance(left, Variable):
-        raise ValueError("The left should be a Variable.")
-    if not isinstance(right, Variable):
-        raise ValueError("The right should be a Variable.")
+    check_variable_and_dtype(label, 'label', ['float32'], 'margin_rank_loss')
+    check_variable_and_dtype(label, 'left', ['float32'], 'margin_rank_loss')
+    check_variable_and_dtype(label, 'right', ['float32'], 'margin_rank_loss')
     out = helper.create_variable_for_type_inference(left.dtype)
     act = helper.create_variable_for_type_inference(left.dtype)
     helper.append_op(
@@ -1395,9 +1404,14 @@ def sigmoid_cross_entropy_with_logits(x,
     ${comment}
 
     Args:
-        x(${x_type}): ${x_comment}
-        label(${label_type}): ${label_comment}
-        ignore_index(int): ${ignore_index_comment}
+        x(Variable): a 2-D tensor with shape N x D, where N is the batch size and
+                D is the number of classes. This input is a tensor of logits computed
+                by the previous operator. Logits are unscaled log probabilities given
+                as log(p/(1-p)) The data type should be float32 or float64.
+        label (Variable): a 2-D tensor of the same type and shape as X.
+                This input is a tensor of probabalistic labels for each logit.
+        ignore_index(int): Specifies a target value that is ignored and 
+                does not contribute to the input gradient.
         name(str|None): The default value is None.  Normally there is
             no need for user to set this property.  For more information,
             please refer to :ref:`api_guide_Name`
@@ -1422,14 +1436,12 @@ def sigmoid_cross_entropy_with_logits(x,
                 normalize=True) # or False
             # loss = fluid.layers.reduce_sum(loss) # summation of loss
     """
+    check_variable_and_dtype(x, 'input', ['float16', 'float32', 'float64'],
+                             'sigmoid_cross_entropy_with_logits')
 
     helper = LayerHelper("sigmoid_cross_entropy_with_logits", **locals())
 
-    if name is None:
-        out = helper.create_variable_for_type_inference(dtype=x.dtype)
-    else:
-        out = helper.create_variable(
-            name=name, dtype=x.dtype, persistable=False)
+    out = helper.create_variable_for_type_inference(dtype=x.dtype)
 
     helper.append_op(
         type="sigmoid_cross_entropy_with_logits",
@@ -1481,6 +1493,11 @@ def teacher_student_sigmoid_loss(input,
           cost = fluid.layers.teacher_student_sigmoid_loss(input=similarity, label=label)
 
     """
+    check_variable_and_dtype(input, "input", ['float32', 'float64'],
+                             'teacher_student_sigmoid_loss')
+    check_variable_and_dtype(label, "label", ['float32', 'float64'],
+                             'teacher_student_sigmoid_loss')
+
     helper = LayerHelper('teacher_student_sigmoid_loss', **locals())
     out = helper.create_variable(dtype=input.dtype)
     helper.append_op(
@@ -1510,8 +1527,8 @@ def huber_loss(input, label, delta):
 
 
     Args:
-        input (Variable): Predicted data, 2D-Tensor with the shape of [batch_size, 1]. The data type should be float32 or float64.
-        label (Variable): Ground truth label, 2D-Tensor with the shape of [batch_size, 1]. The data type should be float32 or float64.
+        input (Variable): Predicted data, 2D-Tensor with the shape of [batch_size, 1]. The data type should be float32.
+        label (Variable): Ground truth label, 2D-Tensor with the shape of [batch_size, 1]. The data type should be float32.
         delta (float): The threshold for Huber loss, which is used to control the balance between the linear error and square error. The data type should be float32.
 
     Returns:
@@ -1540,6 +1557,10 @@ def huber_loss(input, label, delta):
         print(HuberLoss)  #[[1.5], [0.5], [0.5], [0. ]], dtype=float32
     """
     helper = LayerHelper('huber_loss', **locals())
+    check_variable_and_dtype(input, 'input', ['float32', 'float64'],
+                             'huber_loss')
+    check_variable_and_dtype(label, 'label', ['float32', 'float64'],
+                             'huber_loss')
     residual = helper.create_variable_for_type_inference(
         dtype=helper.input_dtype())
     out = helper.create_variable_for_type_inference(dtype=helper.input_dtype())
@@ -1578,6 +1599,10 @@ def kldiv_loss(x, target, reduction='mean', name=None):
             loss = fluid.layers.kldiv_loss(x=x, target=target, reduction='batchmean')
     """
     helper = LayerHelper('kldiv_loss', **locals())
+    check_variable_and_dtype(x, 'x', ['float32', 'float64'], 'kldiv_loss')
+    check_variable_and_dtype(target, 'target', ['float32', 'float64'],
+                             'kldiv_loss')
+    check_type(reduction, 'reduction', str, 'kldiv_loss')
     loss = helper.create_variable_for_type_inference(dtype=x.dtype)
     helper.append_op(
         type='kldiv_loss',
@@ -1629,6 +1654,12 @@ def npair_loss(anchor, positive, labels, l2_reg=0.002):
 
        npair_loss = fluid.layers.npair_loss(anchor, positive, labels, l2_reg = 0.002)
   '''
+    check_variable_and_dtype(anchor, 'anchor', ['float32', 'float64'],
+                             'npair_loss')
+    check_variable_and_dtype(positive, 'positive', ['float32', 'float64'],
+                             'positive')
+    check_variable_and_dtype(labels, 'labels', ['float32', 'float64', 'int64'],
+                             'labels')
     Beta = 0.25
     batch_size = labels.shape[0]
 
@@ -1705,4 +1736,6 @@ def mse_loss(input, label):
 	        # [0.04000002]
 
     """
+    check_variable_and_dtype(input, "input", ['float32', 'float64'], 'mse_loss')
+    check_variable_and_dtype(label, "label", ['float32', 'float64'], 'mse_loss')
     return nn.reduce_mean(square_error_cost(input, label))

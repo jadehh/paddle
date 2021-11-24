@@ -15,7 +15,10 @@
 from ....core import CPUPlace, EOFException
 from .... import compiler
 from ....framework import Variable
+from .... import io
+from .... import profiler
 from .... import scope_guard
+from ....data_feeder import DataFeeder
 from ....log_helper import get_logger
 from ....reader import DataLoaderBase
 from ..graph import *
@@ -27,6 +30,7 @@ import os
 import logging
 import sys
 import pickle
+import functools
 import traceback
 
 __all__ = ['Context', 'Compressor']

@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from ....compiler import CompiledProgram
 from ....data_feeder import DataFeeder
 from .... import executor
 from .graph_wrapper import GraphWrapper

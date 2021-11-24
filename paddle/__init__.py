@@ -1,11 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-# @File     : __init__.py.py
-# @Author   : jade
-# @Date     : 2021/4/30 15:35
-# @Email    : jadehh@1ive.com
-# @Software : Samples
-# @Desc     :
 # Copyright (c) 2016 PaddlePaddle Authors. All Rights Reserved
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -19,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
 import os
 from paddle.check_import_scipy import check_import_scipy
 
@@ -41,3 +34,7 @@ import paddle.compat
 import paddle.distributed
 batch = batch.batch
 import paddle.sysconfig
+import paddle.complex
+
+from . import incubate
+from .incubate import hapi

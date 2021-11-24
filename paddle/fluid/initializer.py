@@ -15,62 +15,20 @@
 from __future__ import print_function
 
 from . import framework
+from . import core
+from .framework import in_dygraph_mode
 import numpy as np
 from .wrapped_decorator import signature_safe_contextmanager
 from .core import VarDesc
 from . import unique_name
+from .data_feeder import check_variable_and_dtype, check_type, check_dtype
 
 __all__ = [
     'Constant', 'Uniform', 'Normal', 'TruncatedNormal', 'Xavier', 'Bilinear',
-    'MSRA', 'force_init_on_cpu', 'init_on_cpu', 'ConstantInitializer',
-    'UniformInitializer', 'NormalInitializer', 'TruncatedNormalInitializer',
-    'XavierInitializer', 'BilinearInitializer', 'MSRAInitializer',
-    'NumpyArrayInitializer'
+    'MSRA', 'ConstantInitializer', 'UniformInitializer', 'NormalInitializer',
+    'TruncatedNormalInitializer', 'XavierInitializer', 'BilinearInitializer',
+    'MSRAInitializer', 'NumpyArrayInitializer'
 ]
-
-_force_init_on_cpu_ = False
-
-
-def force_init_on_cpu():
-    """
-    The flag of whether force to init variables on CPU.
-
-    Returns:
-        bool: the state if we should force init on CPU.
-
-    Examples:
-
-        .. code-block:: python
-
-            import paddle.fluid as fluid
-            if fluid.initializer.force_init_on_cpu():
-                step = fluid.layers.create_global_var(
-                    shape=[2,3], value=1.0, dtype='float32')
-
-    """
-    return _force_init_on_cpu_
-
-
-@signature_safe_contextmanager
-def init_on_cpu():
-    """
-    Force the variable to be inited on CPU.
-
-    Examples:
-        .. code-block:: python
-
-            import paddle.fluid as fluid
-            with fluid.initializer.init_on_cpu():
-                step = fluid.layers.create_global_var(
-                    shape=[2,3], value=1.0, dtype='float32')
-
-    """
-    global _force_init_on_cpu_
-
-    pre_state = force_init_on_cpu()
-    _force_init_on_cpu_ = True
-    yield
-    _force_init_on_cpu_ = pre_state
 
 
 class Initializer(object):
@@ -131,16 +89,14 @@ class ConstantInitializer(Initializer):
 
     Args:
         value (float32): constant value to initialize the variable 
-        force_cpu (bool): place for initialization, if set true, initialization will
-            be forced on CPU even if executor is set on CUDA. default false.
 
     Examples:
         .. code-block:: python
 
     	    import paddle.fluid as fluid
-            x = fluid.data(name="data", shape=[32, 32], dtype="float32")
+            x = fluid.data(name="data", shape=[8, 32, 32], dtype="float32")
 	    fc = fluid.layers.fc(input=x, size=10,
-    		param_attr=fluid.initializer.ConstantInitializer(value=2.0))
+    		param_attr=fluid.initializer.Constant(value=2.0))
 
     """
 
@@ -186,7 +142,7 @@ class ConstantInitializer(Initializer):
                 "shape": var.shape,
                 "dtype": int(out_dtype),
                 "value": float(self._value),
-                'force_cpu': self._force_cpu or force_init_on_cpu()
+                'force_cpu': self._force_cpu
             },
             stop_gradient=True)
 
@@ -261,8 +217,10 @@ class UniformInitializer(Initializer):
         Returns:
             the initialization op
         """
-        assert isinstance(var, framework.Variable)
         assert isinstance(block, framework.Block)
+        check_variable_and_dtype(var, "Out", ["float16", "float32", "float64"],
+                                 "uniform_random")
+
         # Initialization Ops should be prepended and not appended
         if self._seed == 0:
             self._seed = block.program.random_seed
@@ -348,8 +306,10 @@ class NormalInitializer(Initializer):
         Returns:
             the initialization op
         """
-        assert isinstance(var, framework.Variable)
         assert isinstance(block, framework.Block)
+
+        check_variable_and_dtype(var, "Out", ["float16", "float32", "float64"],
+                                 "guassian_random")
         # Initialization Ops should be prepended and not appended
         if self._seed == 0:
             self._seed = block.program.random_seed
@@ -539,8 +499,10 @@ class XavierInitializer(Initializer):
         Returns:
             the initialization op
         """
-        assert isinstance(var, framework.Variable)
         assert isinstance(block, framework.Block)
+        check_variable_and_dtype(var, "Out", ["float16", "float32", "float64"],
+                                 "xavier_init")
+
         f_in, f_out = self._compute_fans(var)
 
         # If fan_in and fan_out are passed, use them
@@ -750,10 +712,10 @@ class BilinearInitializer(Initializer):
             B = 8
             H = W = 32
             w_attr = fluid.param_attr.ParamAttr(
-                learning_rate=0.,
+                learning_rate=0., 
                 regularizer=fluid.regularizer.L2Decay(0.),
                 initializer=fluid.initializer.Bilinear())
-            x = fluid.data(name="data", shape=[B, 3, H, W],
+            x = fluid.data(name="data", shape=[B, 3, H, W], 
                                   dtype="float32")
             conv_up = fluid.layers.conv2d_transpose(
                 input=x,

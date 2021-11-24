@@ -29,7 +29,7 @@ import six
 from ... import layers
 from ...framework import Variable
 from ... import core
-from ... import unique_name
+from ... import framework, unique_name
 from ...layer_helper import LayerHelper
 
 __all__ = ['InitState', 'StateCell', 'TrainingDecoder', 'BeamSearchDecoder']

@@ -21,7 +21,10 @@ from ....framework import Parameter
 from ....framework import Variable
 from ....executor import Executor
 import copy
+from collections import Iterable
+from ....io import save_inference_model, load_inference_model, save_persistables
 import numpy as np
+import pickle
 import os
 
 __all__ = ['GraphWrapper', 'VarWrapper', 'OpWrapper']

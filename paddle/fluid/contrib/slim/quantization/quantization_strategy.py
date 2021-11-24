@@ -13,12 +13,14 @@
 # limitations under the License.
 
 import logging
+import sys
+import numpy as np
 from .... import Executor
 from .... import io
 from .... import core, scope_guard
 from ....compiler import CompiledProgram
 from ....compiler import BuildStrategy
-from ....framework import IrGraph, Program
+from ....framework import IrGraph, Variable, Program
 from ....log_helper import get_logger
 from ..core.strategy import Strategy
 from .quantization_pass import *

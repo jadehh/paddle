@@ -14,13 +14,16 @@
 
 from __future__ import print_function
 
+import sys
 import six
 import random
+import os
 import re
 from .graphviz import GraphPreviewGenerator
 from .proto import framework_pb2
+from google.protobuf import text_format
 from . import unique_name
-from .framework import default_main_program
+from .framework import Program, default_main_program, Variable
 from . import core
 from . import io
 from .layer_helper import LayerHelper

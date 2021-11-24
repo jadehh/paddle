@@ -22,6 +22,6 @@ setup(
 
     packages=find_packages(),
     include_package_data=True,
-    platforms="any",
-    install_requires=["numpy","prettytable","pyyaml","funcsigs","pillow","scipy","rarfile","nltk","requests","objgraph","protobuf","six","decorator","shapely","pyclipper"]  # 这个项目需要的第三方库
+    platforms="win",
+    install_requires=["numpy","gast","astor","prettytable","funcsigs","pillow","scipy","rarfile","nltk","requests","objgraph","protobuf","six","decorator","shapely","pyclipper"]  # 这个项目需要的第三方库
 )

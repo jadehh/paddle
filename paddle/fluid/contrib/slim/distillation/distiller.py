@@ -13,7 +13,11 @@
 # limitations under the License.
 
 from .... import layers
+from .... import optimizer
+from .... import Executor
+from .... import Program
 from .... import program_guard
+from .... import regularizer
 
 __all__ = ['FSPDistiller', 'L2Distiller', 'SoftLabelDistiller']
 

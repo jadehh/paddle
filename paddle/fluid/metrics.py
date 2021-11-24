@@ -19,6 +19,7 @@ from __future__ import print_function
 
 import numpy as np
 import copy
+import warnings
 import six
 
 from .layer_helper import LayerHelper

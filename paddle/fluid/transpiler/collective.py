@@ -14,8 +14,18 @@
 
 from __future__ import print_function
 
+import sys
+import math
+from functools import reduce
+
+import collections
+import six
+import logging
+
+import numpy as np
+
 from .. import core, unique_name
-from ..framework import default_main_program, default_startup_program
+from ..framework import Program, default_main_program, default_startup_program
 from .details import wait_server_ready
 
 __all__ = ['GradAllReduce', 'LocalSGD']
@@ -369,7 +379,7 @@ class SingleProcessMultiThread(GradAllReduce):
     '''
 
     def __init__(self):
-        GradAllReduce.__init__(self, -1)
+        GradAllReduce.__init__(self, 1)
         self.mode = "single_process_multi_thread"
 
     def _transpile_startup_program(self):

@@ -14,7 +14,7 @@
 """Defination of trainers."""
 
 import sys
-from os import path
+import os
 __all__ = ['TrainerDesc', 'MultiTrainer', 'DistMultiTrainer', 'PipelineTrainer']
 
 
@@ -32,9 +32,12 @@ class TrainerDesc(object):
         '''
         # Workaround for relative import in protobuf under python3
         # TODO: should be fixed
-        cur_path = path.dirname(__file__)
-        sys.path.append(cur_path)
-        sys.path.append(cur_path + "/proto")
+        cur_path = os.path.dirname(__file__)
+        if cur_path not in sys.path:
+            sys.path.append(cur_path)
+        if cur_path + "/proto" not in sys.path:
+            sys.path.append(cur_path + "/proto")
+
         from proto import trainer_desc_pb2
         self.proto_desc = trainer_desc_pb2.TrainerDesc()
         import multiprocessing as mp
@@ -46,6 +49,8 @@ class TrainerDesc(object):
         self._infer = False
 
     def _set_fetch_var_and_info(self, fetch_vars, fetch_info, print_period):
+        # convert fetch_info to list
+        fetch_info = list(fetch_info)
         for i, v in enumerate(fetch_vars):
             self.proto_desc.fetch_config.fetch_var_names.extend([v.name])
             self.proto_desc.fetch_config.fetch_var_str_format.extend(
@@ -204,6 +209,7 @@ class TrainerDesc(object):
             config_dict.get("sparse_copy_by_feasign", True)
 
     def _desc(self):
+        from google.protobuf import text_format
         return self.proto_desc.SerializeToString()
 
     def __str__(self):
@@ -229,6 +235,7 @@ class MultiTrainer(TrainerDesc):
         super(MultiTrainer, self)._gen_trainer_desc()
         self.proto_desc.class_name = "MultiTrainer"
         self._device_worker._set_infer(self._infer)
+        self._device_worker._set_program(self._program)
         self._device_worker._gen_worker_desc(self.proto_desc)
 
 
