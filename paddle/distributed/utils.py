@@ -20,12 +20,302 @@ import os
 import signal
 import copy
 import sys
+import six
 import subprocess
 from contextlib import closing
 import socket
+from paddle.fluid import core
+from paddle.distributed.fleet.launch_utils import get_backend_by_compile_flag
+from distutils.util import strtobool
+
+from paddle.fluid.layer_helper import LayerHelper
+from paddle.fluid.framework import in_dygraph_mode
+from paddle.fluid.data_feeder import check_variable_and_dtype
+
+
+__all__ = [     #noqa
+           'get_host_name_ip',
+           'Trainer',
+           'get_cluster',
+           'start_local_trainers',
+           'watch_local_trainers',
+           'find_free_ports',
+           'JobServer',
+           'Cluster',
+           'Pod',
+           'Hdfs',
+           'add_arguments',
+           'terminate_local_procs',
+           'TrainerProc',
+           'get_logger',
+           'pull_worker_log',
+           'global_scatter',
+           'global_gather',
+]
+
+
+def global_scatter(x,
+                   local_count,
+                   global_count,
+                   group=None,
+                   use_calc_stream=True):
+    """
+    Scatter data in x which has been put together belong to one expert 
+    to n_expert * world_size exeperts according to local_count and receive tensors 
+    from n_expert * world_size experts according
+    to global_count.
+    
+    Args:
+        x (Tensor): Tensor. Every element in the list must be a Tensor whose data type
+            should be float16, float32, float64, int32 or int64.
+        local_count (Tensor): Tensor which have n_expert * world_size elements that indicates
+            how many data needed to be sent. Every element in the list must be a Tensor whose 
+            data type should be int64.
+        global_count (Tensor): Tensor which have n_expert * world_size elements that indicates
+            how many data needed to be received. Every element in the list must be a Tensor whose 
+            data type should be int64.
+        group (Group, optional): The group instance return by new_group or None for global default group. Default: None.
+        use_calc_stream (bool, optional): Wether to use calculation stream (True) or communication stream. Default: True.
+    
+    Returns:
+        out (Tensor): The data received from all experts. 
+    
+    Examples:
+        .. code-block:: python
+
+            # required: distributed
+            import numpy as np
+            import paddle
+            from paddle.distributed import init_parallel_env
+            init_parallel_env()
+            n_expert = 2
+            world_size = 2
+            d_model = 2
+            in_feat = d_model
+            local_input_buf = np.array([[1, 2],[3, 4],[5, 6],[7, 8],[9, 10]], \
+            dtype=np.float32)
+            if paddle.distributed.ParallelEnv().local_rank == 0:
+                local_count = np.array([2, 1, 1, 1]) 
+                global_count = np.array([2, 1, 1, 1])
+            else:
+                local_count = np.array([1, 1, 2, 1])
+                global_count = np.array([1, 1, 2, 1])
+            local_input_buf = paddle.to_tensor(local_input_buf, dtype="float32", stop_gradient=False)
+            local_count = paddle.to_tensor(local_count, dtype="int64")
+            global_count = paddle.to_tensor(global_count, dtype="int64")
+            a = paddle.distributed.utils.global_scatter(local_input_buf, \
+            local_count, global_count)
+            a.stop_gradient = False
+            print(a)
+            # out for rank 0: [[1, 2], [3, 4], [1, 2], [5, 6], [3, 4]]
+            # out for rank 1: [[7, 8], [5, 6], [7, 8], [9, 10], [9, 10]]
+            # backward test
+            c = a * a
+            c.backward()
+            print("local_input_buf.grad: ", local_input_buf.grad)
+            # out for rank 0: [[2, 4], [6, 8], [10, 12], [14, 16], [18, 20]]
+            # out for rank 1: [[2, 4], [6, 8], [10, 12], [14, 16], [18, 20]]
+    """
+    if group is not None and not group.is_member():
+        return
+
+    ring_id = 0 if group is None else group.id
+    if in_dygraph_mode():
+        return core.ops.global_scatter(x, local_count, \
+                                    global_count,  \
+                                    'use_calc_stream', use_calc_stream, \
+                                    'ring_id', ring_id)
+    else:
+        op_type = 'global_scatter'
+        check_variable_and_dtype(
+            x, 'x', ['float16', 'float32', 'float64', 'int32', 'int64'],
+            'global_scatter')
+        check_variable_and_dtype(local_count, 'local_count', ['int64'],
+                                 'global_scatter')
+        check_variable_and_dtype(global_count, 'global_count', ['int64'],
+                                 'global_scatter')
+
+        helper = LayerHelper(op_type, **locals())
+        out = helper.create_variable_for_type_inference(dtype=x.dtype)
+
+        helper.append_op(
+            type=op_type,
+            inputs={
+                'X': [x],
+                'local_count': [local_count],
+                'global_count': [global_count],
+            },
+            outputs={'Out': [out]},
+            attrs={'ring_id': ring_id,
+                   'use_calc_stream': use_calc_stream})
+        return out
+
+
+def global_gather(x,
+                  local_count,
+                  global_count,
+                  group=None,
+                  use_calc_stream=True):
+    """
+    Gather data in x to n_expert * world_size exeperts according to
+    local_count and receive tensors from n_expert * world_size experts according
+    to global_count.
+
+    Args:
+        x (Tensor): Tensor. Every element in the list must be a Tensor whose data type
+            should be float16, float32, float64, int32 or int64.
+        local_count (Tensor): Tensor which have n_expert * world_size elements that indicates
+            how many data needed to be received. Every element in the list must be a Tensor whose 
+            data type should be int64.
+        global_count (Tensor): Tensor which have n_expert * world_size elements that indicates
+            how many data needed to be sent. Every element in the list must be a Tensor whose 
+            data type should be int64.
+        group (Group, optional): The group instance return by new_group or None for global default group. Default: None.
+        use_calc_stream (bool, optional): Wether to use calculation stream (True) or communication stream. Default: True.
+    
+    Returns:
+        None.
+    
+    Examples:
+        .. code-block:: python
+
+            # required: distributed
+            import numpy as np
+            import paddle
+            from paddle.distributed import init_parallel_env
+            init_parallel_env()
+            n_expert = 2
+            world_size = 2
+            d_model = 2
+            in_feat = d_model
+            local_input_buf = np.array([[1, 2],[3, 4],[5, 6],[7, 8],[9, 10]],\
+                                        dtype=np.float32)
+            if paddle.distributed.ParallelEnv().local_rank == 0:
+                local_count = np.array([2, 1, 1, 1])
+                global_count = np.array([2, 1, 1, 1])
+            else:
+                local_count = np.array([1, 1, 2, 1])
+                global_count = np.array([1, 1, 2, 1])
+            local_input_buf = paddle.to_tensor(local_input_buf, dtype="float32", stop_gradient=False)
+            local_count = paddle.to_tensor(local_count, dtype="int64")
+            global_count = paddle.to_tensor(global_count, dtype="int64")
+            a = paddle.distributed.utils.global_gather(local_input_buf, local_count, global_count)
+            print(a)
+            # out for rank 0: [[1, 2], [3, 4], [7, 8], [1, 2], [7, 8]]
+            # out for rank 1: [[5, 6], [9, 10], [3, 4], [5, 6], [9, 10]]
+            a.stop_gradient = False
+            c = a * a
+            c.backward()
+            print("local_input_buf.grad", local_input_buf.grad)
+            # out for rank 0: [[2, 4], [6, 8], [10, 12], [14, 16], [18, 20]]
+            # out for rank 1: [[2, 4], [6, 8], [10, 12], [14, 16], [18, 20]]
+    """
+    if group is not None and not group.is_member():
+        return
+
+    ring_id = 0 if group is None else group.id
+    if in_dygraph_mode():
+        return core.ops.global_gather(x, local_count, \
+                                    global_count, \
+                                    'use_calc_stream', use_calc_stream, \
+                                    'ring_id', ring_id)
+    else:
+        op_type = 'global_gather'
+        check_variable_and_dtype(
+            x, 'x', ['float16', 'float32', 'float64', 'int32', 'int64'],
+            'global_gather')
+
+        check_variable_and_dtype(local_count, 'local_count', ['int64'],
+                                 'global_gather')
+
+        check_variable_and_dtype(global_count, 'global_count', ['int64'],
+                                 'global_gather')
+        helper = LayerHelper(op_type, **locals())
+        out = helper.create_variable_for_type_inference(dtype=x.dtype)
+
+        helper.append_op(
+            type=op_type,
+            inputs={
+                'X': [x],
+                'local_count': [local_count],
+                'global_count': [global_count]
+            },
+            outputs={'Out': [out]},
+            attrs={
+                'ring_id': group,
+                'use_calc_stream': use_calc_stream,
+            })
+        return out
+
 
 logger = logging.getLogger("root")
 logger.propagate = False
+
+
+def get_cluster_from_args(args, selected_gpus):
+    node_ips = [x.strip() for x in args.cluster_node_ips.split(',')]
+    node_ip = args.node_ip
+    node_rank = node_ips.index(node_ip)
+
+    logger.debug("parsed from args:node_ips:{} node_ip:{} node_rank:{}".format(
+        node_ips, node_ip, node_rank))
+
+    free_ports = None
+    if not args.use_paddlecloud and len(
+            node_ips) <= 1 and args.started_port is None:
+        free_ports = find_free_ports(len(selected_gpus))
+        if free_ports is not None:
+            free_ports = list(free_ports)
+    else:
+        started_port = 6070
+        if args.started_port is not None:
+            started_port = args.started_port
+
+        free_ports = [
+            x for x in range(started_port, started_port + len(selected_gpus))
+        ]
+
+    trainer_endpoints = []
+    for ip in node_ips:
+        trainer_endpoints.append(["%s:%d" % (ip, port) for port in free_ports])
+    return get_cluster(node_ips, node_ip, trainer_endpoints, selected_gpus)
+
+
+def get_gpus(selected_gpus):
+    if selected_gpus is None:
+        from paddle.fluid import core
+        gpus_num = core.get_cuda_device_count()
+        gpus = [str(x) for x in range(0, gpus_num)]
+    else:
+        cuda_visible_devices = os.getenv("CUDA_VISIBLE_DEVICES")
+        if cuda_visible_devices is None or cuda_visible_devices == "":
+            gpus = [x.strip() for x in selected_gpus.split(',')]
+        else:
+            # change selected_gpus into relative values
+            # e.g. CUDA_VISIBLE_DEVICES=4,5,6,7; args.selected_gpus=4,5,6,7;
+            # therefore selected_gpus=0,1,2,3
+            cuda_visible_devices_list = cuda_visible_devices.split(',')
+            for x in selected_gpus.split(','):
+                assert x in cuda_visible_devices_list, "Can't find "\
+                "your selected_gpus %s in CUDA_VISIBLE_DEVICES[%s]."\
+                % (x, cuda_visible_devices)
+            gpus = [
+                cuda_visible_devices_list.index(x.strip())
+                for x in selected_gpus.split(',')
+            ]
+            logger.info("Change selected_gpus into reletive values. --ips:{} "
+                        "will change into relative_ips:{} according to your "
+                        "CUDA_VISIBLE_DEVICES:{}".format(
+                            selected_gpus, gpus, cuda_visible_devices_list))
+
+    return gpus
+
+
+def _print_arguments(args):
+    print("-----------  Configuration Arguments -----------")
+    for arg, value in sorted(six.iteritems(vars(args))):
+        print("%s: %s" % (arg, value))
+    print("------------------------------------------------")
 
 
 class Hdfs(object):
@@ -80,7 +370,7 @@ class Cluster(object):
     def __ne__(self, cluster):
         return not self.__eq__(cluster)
 
-    def update_pods(cluster):
+    def update_pods(self, cluster):
         self.pods = copy.copy(cluster.pods)
 
     def trainers_nranks(self):
@@ -143,7 +433,7 @@ class Trainer(object):
             return False
 
         if self.endpoint != t.endpoint or \
-                self.rank != t.rank :
+                self.rank != t.rank:
             return False
 
         for a, b in zip(self.gpus, t.gpus):
@@ -155,7 +445,7 @@ class Trainer(object):
     def __ne__(self, t):
         return not self == t
 
-    def rank(self):
+    def get_rank(self):
         return self.rank
 
 
@@ -178,7 +468,7 @@ class Pod(object):
                 self.id != pod.id or \
                 self.addr != pod.addr or \
                 self.port != pod.port:
-            logger.debug("pod {} != pod".format(self, pod))
+            logger.debug("pod {} != {}".format(self, pod))
             return False
 
         if len(self.trainers) != len(pod.trainers):
@@ -258,7 +548,8 @@ def terminate_local_procs(procs):
     for p in procs:
         if p.proc.poll() is None:
             p.proc.terminate()
-            p.log_fn.close()
+            if p.log_fn:
+                p.log_fn.close()
             logger.debug("terminate process id:{}".format(p.proc.pid))
 
     #wait all process terminiated
@@ -297,7 +588,7 @@ def add_arguments(argname, type, default, help, argparser, **kwargs):
         add_argument("name", str, "Jonh", "User name.", parser)
         args = parser.parse_args()
     """
-    type = distutils.util.strtobool if type == bool else type
+    type = strtobool if type == bool else type
     argparser.add_argument(
         "--" + argname,
         default=default,
@@ -332,11 +623,50 @@ def find_free_ports(num):
     return None
 
 
+def _prepare_trainer_env(cluster, trainer, backend=None):
+    if backend is None:
+        backend = get_backend_by_compile_flag()  # for compatibility
+    if backend == 'bkcl':
+        proc_env = {
+            "FLAGS_selected_xpus":
+            "%s" % ",".join([str(g) for g in trainer.gpus]),
+            "PADDLE_TRAINER_ID": "%d" % trainer.rank,
+            "PADDLE_CURRENT_ENDPOINT": "%s" % trainer.endpoint,
+            "PADDLE_TRAINERS_NUM": "%d" % cluster.trainers_nranks(),
+            "PADDLE_TRAINER_ENDPOINTS": ",".join(cluster.trainers_endpoints())
+        }
+    elif backend == 'nccl':
+        proc_env = {
+            "FLAGS_selected_gpus":
+            "%s" % ",".join([str(g) for g in trainer.gpus]),
+            "PADDLE_TRAINER_ID": "%d" % trainer.rank,
+            "PADDLE_CURRENT_ENDPOINT": "%s" % trainer.endpoint,
+            "PADDLE_TRAINERS_NUM": "%d" % cluster.trainers_nranks(),
+            "PADDLE_TRAINER_ENDPOINTS": ",".join(cluster.trainers_endpoints())
+        }
+    elif backend == 'gloo':
+        # NOTE (xiongkun) default fall back into cpu only
+        proc_env = {
+            "PADDLE_TRAINER_ID": "%d" % trainer.rank,
+            "PADDLE_CURRENT_ENDPOINT": "%s" % trainer.endpoint,
+            "PADDLE_TRAINERS_NUM": "%d" % cluster.trainers_nranks(),
+            "PADDLE_TRAINER_ENDPOINTS": ",".join(cluster.trainers_endpoints()),
+            "PADDLE_DISTRI_BACKEND":
+            backend,  # only add here, other will be auto
+        }
+    else:
+        raise ValueError("backend must be one of 'gloo, nccl, bkcl'")
+
+    return proc_env
+
+
 class TrainerProc(object):
     def __init__(self):
         self.proc = None
         self.log_fn = None
+        self.log_offset = None
         self.rank = None
+        self.local_rank = None
         self.cmd = None
 
 
@@ -355,14 +685,7 @@ def start_local_trainers(cluster,
 
     procs = []
     for idx, t in enumerate(pod.trainers):
-        proc_env = {
-            "FLAGS_selected_gpus": "%s" % ",".join([str(g) for g in t.gpus]),
-            "PADDLE_TRAINER_ID": "%d" % t.rank,
-            "PADDLE_CURRENT_ENDPOINT": "%s" % t.endpoint,
-            "PADDLE_TRAINERS_NUM": "%d" % cluster.trainers_nranks(),
-            "PADDLE_TRAINER_ENDPOINTS": ",".join(cluster.trainers_endpoints())
-        }
-
+        proc_env = _prepare_trainer_env(cluster, t)
         current_env.update(proc_env)
 
         logger.debug("trainer proc env:{}".format(current_env))
@@ -382,12 +705,29 @@ def start_local_trainers(cluster,
         tp = TrainerProc()
         tp.proc = proc
         tp.rank = t.rank
+        tp.local_rank = idx
         tp.log_fn = fn
+        tp.log_offset = fn.tell() if fn else None
         tp.cmd = cmd
 
         procs.append(tp)
 
     return procs
+
+
+def pull_worker_log(tp):
+    if tp.log_fn:
+        with open(tp.log_fn.name, 'r') as fin:
+            fin.seek(tp.log_offset, 0)
+            for line in fin:
+                try:
+                    sys.stdout.write(line)
+                except UnicodeEncodeError:
+                    sys.stdout.write(
+                        'UnicodeEncodeError occurs at this line. '
+                        'Please refer to the original log file "%s"\n' %
+                        tp.log_fn.name)
+            tp.log_offset = fin.tell()
 
 
 def watch_local_trainers(procs, nranks):
@@ -397,6 +737,9 @@ def watch_local_trainers(procs, nranks):
         # wait all process finish or one error
         alive = False
         for p in procs:
+            if p.log_fn and p.local_rank == 0:
+                pull_worker_log(p)
+
             ret = p.proc.poll()
             if ret is None:
                 alive = True

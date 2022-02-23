@@ -14,6 +14,7 @@
 
 from . import core
 from .framework import dygraph_only
+from paddle import _C_ops
 
 
 @dygraph_only
@@ -40,22 +41,24 @@ def _append_activation_in_dygraph(input,
     if use_mkldnn:
         attrs += ('use_mkldnn', use_mkldnn)
 
-    act_op = getattr(core.ops, act)
+    act_op = getattr(_C_ops, act)
     return act_op(input, *attrs)
 
 
 @dygraph_only
-def _append_bias_in_dygraph(input, bias=None, axis=1):
+def _append_bias_in_dygraph(input, bias=None, axis=1, use_mkldnn=False):
     """Append bias operation in dygraph mode.
 
         Args:
             input: the input variable. 
             bias:  the bias to be appended
             axis:  the axis to perform operation
+            use_mkldnn: whether to use mkldnn
 
     Return the Variable after bias operation
     """
     if bias is None:
         return input
 
-    return core.ops.elementwise_add(input, bias, 'axis', axis)
+    return _C_ops.elementwise_add(input, bias, 'axis', axis, 'use_mkldnn',
+                                  use_mkldnn)

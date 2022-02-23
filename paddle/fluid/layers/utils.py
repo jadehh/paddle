@@ -17,12 +17,13 @@ import collections
 import copy
 import six
 import numpy as np
-from ..framework import Variable
+from ..framework import Block, Variable, in_dygraph_mode
 from ..data_feeder import convert_dtype, check_variable_and_dtype, check_type, check_dtype
 from ..layer_helper import LayerHelper
+from sys import version_info
 
 
-def convert_to_list(value, n, name, dtype=np.int):
+def convert_to_list(value, n, name, dtype=int):
     """
     Converts a single numerical type or iterable of numerical
     types into an numerical type list.
@@ -77,6 +78,15 @@ def is_sequence(seq):
             not isinstance(seq, six.string_types))
 
 
+def _hash_with_id(*args):
+    """
+    Return int hash value calculated by id(arg) or tuple(id1,id2, ...).
+    """
+    assert len(args) > 0
+    info = tuple([id(v) for v in args])
+    return hash(info) & 0xfffffff
+
+
 def _sorted(dict_):
     """
     Returns a sorted list of the dict keys, with error if keys not sortable.
@@ -112,6 +122,10 @@ def _yield_flat_nest(nest):
 
 def flatten(nest):
     """
+	:alias_main: paddle.flatten
+	:alias: paddle.flatten,paddle.tensor.flatten,paddle.tensor.manipulation.flatten
+	:old_api: paddle.fluid.layers.flatten
+
     Traverse all entries in the nested structure and put them into an list.
     """
     if is_sequence(nest):
@@ -278,7 +292,7 @@ def _contain_var(list_or_tuple):
     return False
 
 
-def _get_shape_tensor_inputs(inputs, helper, attrs, shape, op_type):
+def get_shape_tensor_inputs(inputs, attrs, shape, op_type):
     from .tensor import fill_constant, cast
 
     def _get_attr_shape(list_shape):
@@ -291,7 +305,7 @@ def _get_shape_tensor_inputs(inputs, helper, attrs, shape, op_type):
         return attr_shape
 
     def _get_shape_tensor(list_shape):
-        new_shape_tensor = []
+        shape_tensor_list = []
         for idx, dim in enumerate(list_shape):
             if isinstance(dim, Variable):
                 dim.stop_gradient = True
@@ -301,11 +315,11 @@ def _get_shape_tensor_inputs(inputs, helper, attrs, shape, op_type):
                     '(When type of shape in' + op_type + 'is list or tuple.)')
                 if convert_dtype(dim.dtype) == 'int64':
                     dim = cast(x=dim, dtype='int32')
-                new_shape_tensor.append(dim)
+                shape_tensor_list.append(dim)
             else:
                 temp_out = fill_constant([1], 'int32', dim, force_cpu=True)
-                new_shape_tensor.append(temp_out)
-        return new_shape_tensor
+                shape_tensor_list.append(temp_out)
+        return shape_tensor_list
 
     if isinstance(shape, Variable):
         shape.stop_gradient = True
@@ -321,5 +335,134 @@ def _get_shape_tensor_inputs(inputs, helper, attrs, shape, op_type):
         attrs["shape"] = _get_attr_shape(shape)
         if _contain_var(shape):
             inputs['ShapeTensorList'] = _get_shape_tensor(shape)
+    else:
+        raise TypeError("Shape only supports Variable, or list, or tuple.")
 
-    return inputs
+
+def _convert_to_tensor_list(old_list, dtype="int32"):
+    """
+    Converts all elements of a list to Variable.
+    """
+    from .tensor import fill_constant
+    new_list_tensor = []
+    for ele in old_list:
+
+        if isinstance(ele, Variable):
+            ele.stop_gradient = True
+            new_list_tensor.append(ele)
+        else:
+            assert isinstance(ele, six.integer_types)
+            temp_out = fill_constant([1], dtype, ele, force_cpu=True)
+            new_list_tensor.append(temp_out)
+    return new_list_tensor
+
+
+def convert_shape_to_list(shape):
+    """
+    Convert shape(list, tuple, variable) to list in imperative mode
+    """
+    if isinstance(shape, (list, tuple)):
+        shape = list(
+            map(lambda x: x.numpy()[0] if isinstance(x, Variable) else x,
+                shape))
+    else:
+        shape = shape.numpy().astype(int).tolist()
+    return shape
+
+
+def check_shape(shape):
+    """
+    Check shape type and shape elements type before passing it to fill_constant
+    """
+    if isinstance(shape, Variable):
+        check_dtype(shape.dtype, 'shape', ['int32', 'int64'], 'fill_constant')
+    else:
+        for ele in shape:
+            if not isinstance(ele, Variable):
+                if ele < 0:
+                    raise ValueError(
+                        "All elements in ``shape`` must be positive when it's a list or tuple"
+                    )
+                if not isinstance(ele, six.integer_types):
+                    raise TypeError(
+                        "All elements in ``shape`` must be integers when it's a list or tuple"
+                    )
+
+
+def try_set_static_shape_tensor(tensor, shape):
+    """Try to set static shape of tensor from a shape tensor.
+    
+    For example,
+
+    import paddle
+    paddle.enable_static()
+    data = paddle.static.data(name="x", shape=[-1, 2], dtype='float32')
+    shape = paddle.shape(data)  # shape should be [-1, 2] instead of [-1, -1]
+    x = paddle.uniform(shape) 
+    print(x.shape) 
+    # (-1, 2)
+    
+    """
+    if not in_dygraph_mode():
+        # static mode, and shape is not all inferred (contains -1)
+        if -1 in tensor.shape:
+            if isinstance(shape, Variable):
+                shape = try_get_constant_shape_from_tensor(shape)
+                if shape:
+                    tensor.desc.set_shape(shape)
+
+
+def try_get_constant_shape_from_tensor(shape_tensor):
+    """Try to get shape from a tensor with constant value.
+
+    For example,
+    
+    import paddle
+    paddle.enable_static()
+    data = paddle.static.data(name="x", shape=[-1, 2], dtype='float32')
+    shape = paddle.shape(data)  # shape should be [-1, 2] instead of [-1, -1]
+    x = paddle.uniform(shape) 
+    print(x.shape) 
+    # (-1, 2)
+    
+    """
+    if not in_dygraph_mode():
+        try:
+            if shape_tensor.op is not None:
+                generate_op = shape_tensor.op
+                if generate_op.type == 'shape':
+                    var = shape_tensor.block.vars[generate_op.input_arg_names[
+                        0]]
+                    return var.shape
+        except:
+            return None
+
+        return None
+
+
+def get_inputs_outputs_in_block(block):
+    """
+    Returns the inputs and outputs variable used in this block but not
+    created in this block.
+    """
+    assert isinstance(
+        block,
+        Block), "input non-Block argument for get_inputs_outputs_in_block."
+    assert block.parent_idx != -1, "input block should be a sub-block, not main block."
+
+    # Find input/output var names of all ops in block
+    inner_inputs = set()
+    inner_outputs = set()
+    for op in block.ops:
+        for iname in op.input_names:
+            for in_var_name in op.input(iname):
+                if not block.has_var(in_var_name):
+                    # variable not created in this block
+                    inner_inputs.add(in_var_name)
+        for oname in op.output_names:
+            for out_var_name in op.output(oname):
+                if not block.has_var(out_var_name):
+                    # variable not created in this block
+                    inner_outputs.add(out_var_name)
+
+    return inner_inputs, inner_outputs

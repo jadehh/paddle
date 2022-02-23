@@ -14,15 +14,14 @@
 
 from __future__ import print_function
 
+import paddle
 from six.moves import reduce
 from .. import core
 from ..layers import utils
-from ..layers import square
-from ..layers import cross_entropy
 from ..layers import nn as F
 from .. import dygraph_utils
 from . import layers
-from ..framework import Variable, in_dygraph_mode, OpProtoHolder, Parameter, _dygraph_tracer, _varbase_creator, default_main_program
+from ..framework import Variable, in_dygraph_mode, OpProtoHolder, Parameter, _dygraph_tracer, _varbase_creator, default_main_program, _global_flags
 from ..data_feeder import convert_dtype, check_variable_and_dtype, check_type, check_dtype
 from ..param_attr import ParamAttr
 from ..initializer import Normal, Constant, NumpyArrayInitializer
@@ -32,17 +31,20 @@ from ..data_feeder import check_variable_and_dtype, check_type
 import numpy as np
 import numbers
 import logging
+import os
+import paddle.utils.deprecated as deprecated
+from paddle import _C_ops
 
 __all__ = [
     'Conv2D', 'Conv3D', 'Pool2D', 'Linear', 'BatchNorm', 'Dropout', 'Embedding',
     'GRUUnit', 'InstanceNorm', 'LayerNorm', 'NCE', 'PRelu',
     'BilinearTensorProduct', 'Conv2DTranspose', 'Conv3DTranspose', 'GroupNorm',
-    'SpectralNorm', 'TreeConv', 'MSELoss', 'L1Loss', 'NLLLoss', 'BCELoss'
+    'SpectralNorm', 'TreeConv', 'Flatten'
 ]
 
 
 class Conv2D(layers.Layer):
-    """
+    r"""
     This interface is used to construct a callable object of the ``Conv2D`` class.
     For more details, refer to code examples.
     The convolution2D layer calculates the output based on the input, filter
@@ -110,7 +112,7 @@ class Conv2D(layers.Layer):
         dilation (int or tuple, optional): The dilation size. If dilation is a tuple, it must
             contain two integers, (dilation_H, dilation_W). Otherwise, the
             dilation_H = dilation_W = dilation. Default: 1.
-        groups (int, optional): The groups number of the Conv2d Layer. According to grouped
+        groups (int, optional): The groups number of the Conv2D Layer. According to grouped
             convolution in Alex Krizhevsky's Deep CNN paper: when group=2,
             the first half of the filters is only connected to the first half
             of the input channels, while the second half of the filters is only
@@ -173,6 +175,11 @@ class Conv2D(layers.Layer):
                  dtype='float32'):
         assert param_attr is not False, "param_attr should not be False here."
         super(Conv2D, self).__init__()
+
+        if (core.is_compiled_with_cuda() and paddle.fluid.get_flags(
+                "FLAGS_conv2d_disable_cudnn")["FLAGS_conv2d_disable_cudnn"]):
+            use_cudnn = False
+
         self._num_channels = num_channels
         self._groups = groups
         self._stride = utils.convert_to_list(stride, 2, 'stride')
@@ -182,6 +189,7 @@ class Conv2D(layers.Layer):
         if not isinstance(use_cudnn, bool):
             raise ValueError("use_cudnn should be True or False")
         self._use_cudnn = use_cudnn
+        self._use_mkldnn = _global_flags()["FLAGS_use_mkldnn"]
         self._filter_size = filter_size
         self._num_filters = num_filters
         self._param_attr = param_attr
@@ -189,10 +197,19 @@ class Conv2D(layers.Layer):
         self._dtype = dtype
 
         if (self._num_channels == self._groups and
-                num_filters % self._num_channels == 0 and not self._use_cudnn):
+                num_filters % self._num_channels == 0 and
+                not self._use_cudnn and not self._use_mkldnn):
             self._l_type = 'depthwise_conv2d'
         else:
             self._l_type = 'conv2d'
+
+        # NPU only supports depthwise_conv2d when  "input_channel = output_channel = groups"
+        if core.is_compiled_with_npu():
+            if (self._num_channels == self._groups and
+                    self._num_channels == self._num_filters):
+                l_type = 'depthwise_conv2d'
+            else:
+                l_type = 'conv2d'
 
         self._num_channels = num_channels
         if self._groups is None:
@@ -226,14 +243,15 @@ class Conv2D(layers.Layer):
         if in_dygraph_mode() and self._l_type == 'conv2d':
             attrs = ('strides', self._stride, 'paddings', self._padding,
                      'dilations', self._dilation, 'groups', self._groups
-                     if self._groups else 1, 'use_cudnn', self._use_cudnn)
-            out = core.ops.conv2d(input, self.weight, *attrs)
+                     if self._groups else 1, 'use_cudnn', self._use_cudnn,
+                     'use_mkldnn', self._use_mkldnn)
+            out = _C_ops.conv2d(input, self.weight, *attrs)
             pre_bias = out
 
-            pre_act = dygraph_utils._append_bias_in_dygraph(pre_bias, self.bias,
-                                                            1)
-            return dygraph_utils._append_activation_in_dygraph(pre_act,
-                                                               self._act)
+            pre_act = dygraph_utils._append_bias_in_dygraph(
+                pre_bias, self.bias, 1, use_mkldnn=self._use_mkldnn)
+            return dygraph_utils._append_activation_in_dygraph(
+                pre_act, self._act, use_mkldnn=self._use_mkldnn)
         inputs = {
             'Input': [input],
             'Filter': [self.weight],
@@ -244,7 +262,7 @@ class Conv2D(layers.Layer):
             'dilations': self._dilation,
             'groups': self._groups if self._groups else 1,
             'use_cudnn': self._use_cudnn,
-            'use_mkldnn': False,
+            'use_mkldnn': self._use_mkldnn,
         }
 
         check_variable_and_dtype(input, 'input',
@@ -269,7 +287,8 @@ class Conv2D(layers.Layer):
                 inputs={'X': [pre_bias],
                         'Y': [self.bias]},
                 outputs={'Out': [pre_act]},
-                attrs={'axis': 1})
+                attrs={'axis': 1,
+                       'use_mkldnn': self._use_mkldnn})
         else:
             pre_act = pre_bias
 
@@ -278,7 +297,7 @@ class Conv2D(layers.Layer):
 
 
 class Conv3D(layers.Layer):
-    """
+    r"""
     **Convlution3D Layer**
 
     The convolution3D layer calculates the output based on the input, filter
@@ -341,7 +360,7 @@ class Conv3D(layers.Layer):
         dilation (int|tuple, optional): The dilation size. If dilation is a tuple, it must
             contain three integers, (dilation_D, dilation_H, dilation_W). Otherwise, the
             dilation_D = dilation_H = dilation_W = dilation. The default value is 1.
-        groups (int, optional): The groups number of the Conv3d Layer. According to grouped
+        groups (int, optional): The groups number of the Conv3D Layer. According to grouped
             convolution in Alex Krizhevsky's Deep CNN paper: when group=2,
             the first half of the filters is only connected to the first half
             of the input channels, while the second half of the filters is only
@@ -480,7 +499,7 @@ class Conv3D(layers.Layer):
 
 
 class Conv3DTranspose(layers.Layer):
-    """
+    r"""
     **Convlution3D transpose layer**
 
     The convolution3D transpose layer calculates the output based on the input,
@@ -570,7 +589,7 @@ class Conv3DTranspose(layers.Layer):
         dilation(int|tuple, optional): The dilation size. If dilation is a tuple, it must
             contain three integers, (dilation_D, dilation_H, dilation_W). Otherwise, the
             dilation_D = dilation_H = dilation_W = dilation. The default value is 1.
-        groups(int, optional): The groups number of the Conv3d transpose layer. Inspired by
+        groups(int, optional): The groups number of the Conv3D transpose layer. Inspired by
             grouped convolution in Alex Krizhevsky's Deep CNN paper, in which
             when group=2, the first half of the filters is only connected to the
             first half of the input channels, while the second half of the
@@ -697,7 +716,8 @@ class Conv3DTranspose(layers.Layer):
 
 
 class Pool2D(layers.Layer):
-    """
+    r"""
+
     This interface is used to construct a callable object of the ``Pool2D`` class.
     For more details, refer to code examples.
     The pooling2d operation calculates the output based on the input, pool_type and pool_size, pool_stride,
@@ -769,14 +789,19 @@ class Pool2D(layers.Layer):
         ceil_mode (bool, optional): Whether to use the ceil function to calculate output height and width.
             False is the default. If it is set to False, the floor function will be used. Default: False.
         exclusive (bool, optional): Whether to exclude padding points in average pooling mode. Default: True.
+        data_format (string): The data format of the input and output data. An optional string from: `"NCHW"`, `"NHWC"`.
+            The default is `"NCHW"`. When it is `"NCHW"`, the data is stored in the order of:
+            ``[batch_size, input_channels, input_height, input_width]``. When it is `"NHWC"`, the data is 
+            stored in the order of: ``[batch_size, input_height, input_width, input_channels]``
 
     Returns:
         None
 
     Raises:
-        ValueError: If 'pool_type' is not "max" nor "avg"
-        ValueError: If 'global_pooling' is False and 'pool_size' is -1
-        ValueError: If 'use_cudnn' is not a bool value.
+        ValueError: If ``pool_type`` is not "max" nor "avg".
+        ValueError: If ``global_pooling`` is False and ``pool_size`` is -1.
+        ValueError: If ``use_cudnn`` is not a bool value.
+        ValueError: If ``data_format`` is not "NCHW" nor "NHWC".
 
     Examples:
 
@@ -804,7 +829,10 @@ class Pool2D(layers.Layer):
                  global_pooling=False,
                  use_cudnn=True,
                  ceil_mode=False,
-                 exclusive=True):
+                 exclusive=True,
+                 data_format="NCHW"):
+        data_format = data_format.upper()  # supprt NHWC, nhwc, etc.
+        pool_type = pool_type.lower()  # supprt max, Max, etc.
         if pool_type not in ["max", "avg"]:
             raise ValueError(
                 "Unknown pool_type: '%s'. It can only be 'max' or 'avg'.",
@@ -818,6 +846,13 @@ class Pool2D(layers.Layer):
         if not isinstance(use_cudnn, bool):
             raise ValueError("use_cudnn should be True or False")
 
+        self._use_mkldnn = _global_flags()["FLAGS_use_mkldnn"]
+
+        if data_format not in ["NCHW", "NHWC"]:
+            raise ValueError(
+                "Attr(data_format) should be 'NCHW' or 'NHWC'. Received "
+                "Attr(data_format): %s." % str(data_format))
+
         super(Pool2D, self).__init__()
 
         self._pool_type = pool_type
@@ -829,6 +864,7 @@ class Pool2D(layers.Layer):
         self._use_cudnn = use_cudnn
         self._ceil_mode = ceil_mode
         self._exclusive = exclusive
+        self._data_format = data_format
         self._l_type = 'pool2d'
 
     def forward(self, input):
@@ -837,8 +873,9 @@ class Pool2D(layers.Layer):
                      'global_pooling', self._global_pooling, 'strides',
                      self._pool_stride, 'paddings', self._pool_padding,
                      'use_cudnn', self._use_cudnn, 'ceil_mode', self._ceil_mode,
-                     'use_mkldnn', False, 'exclusive', self._exclusive)
-            return core.ops.pool2d(input, *attrs)
+                     'use_mkldnn', self._use_mkldnn, 'exclusive',
+                     self._exclusive, 'data_format', self._data_format)
+            return _C_ops.pool2d(input, *attrs)
 
         check_variable_and_dtype(
             input, 'input', ['int8', 'uint8', 'float16', 'float32', 'float64'],
@@ -852,8 +889,9 @@ class Pool2D(layers.Layer):
             "paddings": self._pool_padding,
             "use_cudnn": self._use_cudnn,
             "ceil_mode": self._ceil_mode,
-            "use_mkldnn": False,
+            "use_mkldnn": self._use_mkldnn,
             "exclusive": self._exclusive,
+            "data_format": self._data_format,
         }
         inputs = {"X": [input]}
 
@@ -869,6 +907,7 @@ class Pool2D(layers.Layer):
 
 class Linear(layers.Layer):
     """
+    
     Fully-connected linear transformation layer:
 
     .. math::
@@ -936,16 +975,22 @@ class Linear(layers.Layer):
         self.bias = self.create_parameter(
             shape=[output_dim], attr=bias_attr, dtype=dtype, is_bias=True)
 
+        self._use_mkldnn = _global_flags()["FLAGS_use_mkldnn"]
+
     def forward(self, input):
         if in_dygraph_mode():
             pre_bias = _varbase_creator(dtype=input.dtype)
-            core.ops.matmul(input, self.weight, pre_bias, 'transpose_X', False,
-                            'transpose_Y', False, "alpha", 1)
+            _C_ops.matmul(input, self.weight, pre_bias, 'transpose_X', False,
+                          'transpose_Y', False, "alpha", 1, "use_mkldnn",
+                          self._use_mkldnn)
             pre_act = dygraph_utils._append_bias_in_dygraph(
-                pre_bias, self.bias, axis=len(input.shape) - 1)
+                pre_bias,
+                self.bias,
+                axis=len(input.shape) - 1,
+                use_mkldnn=self._use_mkldnn)
 
-            return dygraph_utils._append_activation_in_dygraph(pre_act,
-                                                               self._act)
+            return dygraph_utils._append_activation_in_dygraph(
+                pre_act, self._act, use_mkldnn=self._use_mkldnn)
 
         check_variable_and_dtype(input, 'input',
                                  ['float16', 'float32', 'float64'], "Linear")
@@ -954,6 +999,7 @@ class Linear(layers.Layer):
             "transpose_X": False,
             "transpose_Y": False,
             "alpha": 1,
+            "use_mkldnn": self._use_mkldnn,
         }
         inputs = {"X": [input], "Y": [self.weight]}
 
@@ -968,14 +1014,17 @@ class Linear(layers.Layer):
                 inputs={'X': [tmp],
                         'Y': [self.bias]},
                 outputs={'Out': [pre_activation]},
-                attrs={'axis': len(input.shape) - 1})
+                attrs={
+                    'axis': len(input.shape) - 1,
+                    'use_mkldnn': self._use_mkldnn
+                })
         else:
             pre_activation = tmp
         return self._helper.append_activation(pre_activation, act=self._act)
 
 
 class InstanceNorm(layers.Layer):
-    """
+    r"""
     This interface is used to construct a callable object of the ``InstanceNorm`` class.
     For more details, refer to code examples.
 
@@ -1006,16 +1055,16 @@ class InstanceNorm(layers.Layer):
         num_channels(int): Indicate the number of channels of the input ``Tensor``.
         epsilon(float, optional): A value added to the denominator for
             numerical stability. Default is 1e-5.
-        param_attr(ParamAttr, optional): The parameter attribute for Parameter `scale`
+        param_attr(ParamAttr|bool, optional): The parameter attribute for Parameter `scale`
              of instance_norm. If it is set to None or one attribute of ParamAttr, instance_norm
 	     will create ParamAttr as param_attr, the name of scale can be set in ParamAttr.
 	     If the Initializer of the param_attr is not set, the parameter is initialized 
-	     one. Default: None.
-        bias_attr(ParamAttr, optional): The parameter attribute for the bias of instance_norm.
+	     one. If it is set to False, will not create param_attr. Default: None.
+        bias_attr(ParamAttr|bool, optional): The parameter attribute for the bias of instance_norm.
              If it is set to None or one attribute of ParamAttr, instance_norm
 	     will create ParamAttr as bias_attr, the name of bias can be set in ParamAttr. 
 	     If the Initializer of the bias_attr is not set, the bias is initialized zero. 
-	     Default: None.
+             If it is set to False, will not create bias_attr. Default: None.
         dtype(str, optional): Indicate the data type of the input ``Tensor``,
              which can be float32 or float64. Default: float32.
 
@@ -1049,30 +1098,35 @@ class InstanceNorm(layers.Layer):
                  bias_attr=None,
                  dtype='float32'):
         super(InstanceNorm, self).__init__()
-        assert bias_attr is not False, "bias_attr should not be False in InstanceNorm."
 
+        if param_attr == False or bias_attr == False:
+            assert bias_attr == param_attr, "param_attr and bias_attr must be set to Fasle at the same time in InstanceNorm"
         self._epsilon = epsilon
         self._param_attr = param_attr
         self._bias_attr = bias_attr
         self._dtype = dtype
 
-        self.scale = self.create_parameter(
-            attr=self._param_attr,
-            shape=[num_channels],
-            dtype=self._dtype,
-            default_initializer=Constant(1.0),
-            is_bias=False)
-        self.bias = self.create_parameter(
-            attr=self._bias_attr,
-            shape=[num_channels],
-            dtype=self._dtype,
-            default_initializer=Constant(0.0),
-            is_bias=True)
+        if param_attr != False and bias_attr != False:
+            self.scale = self.create_parameter(
+                attr=self._param_attr,
+                shape=[num_channels],
+                dtype=self._dtype,
+                default_initializer=Constant(1.0),
+                is_bias=False)
+            self.bias = self.create_parameter(
+                attr=self._bias_attr,
+                shape=[num_channels],
+                dtype=self._dtype,
+                default_initializer=Constant(0.0),
+                is_bias=True)
+        else:
+            self.scale = None
+            self.bias = None
 
     def forward(self, input):
         if in_dygraph_mode():
-            out, _, _ = core.ops.instance_norm(input, self.scale, self.bias,
-                                               'epsilon', self._epsilon)
+            out, _, _ = _C_ops.instance_norm(input, self.scale, self.bias,
+                                             'epsilon', self._epsilon)
             return out
 
         check_variable_and_dtype(input, 'input', ['float32', 'float64'],
@@ -1080,7 +1134,10 @@ class InstanceNorm(layers.Layer):
 
         attrs = {"epsilon": self._epsilon}
 
-        inputs = {"X": [input], "Scale": [self.scale], "Bias": [self.bias]}
+        if self.scale and self.bias:
+            inputs = {"X": [input], "Scale": [self.scale], "Bias": [self.bias]}
+        else:
+            inputs = {"X": [input]}
 
         saved_mean = self._helper.create_variable_for_type_inference(
             dtype=self._dtype, stop_gradient=True)
@@ -1101,7 +1158,8 @@ class InstanceNorm(layers.Layer):
 
 
 class BatchNorm(layers.Layer):
-    """
+    r"""
+
     This interface is used to construct a callable object of the ``BatchNorm`` class.
     For more details, refer to code examples.
     It implements the function of the Batch Normalization Layer and can be used 
@@ -1111,16 +1169,16 @@ class BatchNorm(layers.Layer):
     Internal Covariate Shift <https://arxiv.org/pdf/1502.03167.pdf>`_
     for more details.
 
-    When use_global_stats = False, the :math:`\\mu_{\\beta}` 
-    and :math:`\\sigma_{\\beta}^{2}` are the statistics of one mini-batch.
+    When use_global_stats = False, the :math:`\mu_{\beta}` 
+    and :math:`\sigma_{\beta}^{2}` are the statistics of one mini-batch.
     Calculated as follows:
 
     ..  math::
 
-        \\mu_{\\beta} &\\gets \\frac{1}{m} \\sum_{i=1}^{m} x_i \\qquad &//\\
-        \ mini-batch\ mean \\\\
-        \\sigma_{\\beta}^{2} &\\gets \\frac{1}{m} \\sum_{i=1}^{m}(x_i - \\
-        \\mu_{\\beta})^2 \\qquad &//\ mini-batch\ variance \\\\
+        \mu_{\beta} &\gets \frac{1}{m} \sum_{i=1}^{m} x_i \qquad &
+        //\ mini-batch\ mean \\
+        \sigma_{\beta}^{2} &\gets \frac{1}{m} \sum_{i=1}^{m}(x_i - \mu_{\beta})^2 \qquad &
+        //\ mini-batch\ variance \\
 
     - :math:`x` : mini-batch data
     - :math:`m` : the size of the mini-batch data
@@ -1138,13 +1196,14 @@ class BatchNorm(layers.Layer):
  
     ..  math::
 
-        \\hat{x_i} &\\gets \\frac{x_i - \\mu_\\beta} {\\sqrt{\\
-        \\sigma_{\\beta}^{2} + \\epsilon}} \\qquad &//\ normalize \\\\
-        y_i &\\gets \\gamma \\hat{x_i} + \\beta \\qquad &//\ scale\ and\ shift
+        \hat{x_i} &\gets \frac{x_i - \mu_\beta} {\sqrt{\
+        \sigma_{\beta}^{2} + \epsilon}} \qquad &//\ normalize \\
+        y_i &\gets \gamma \hat{x_i} + \beta \qquad &//\ scale\ and\ shift
 
-    - :math:`\\epsilon` : add a smaller value to the variance to prevent division by zero
-    - :math:`\\gamma` : trainable proportional parameter
-    - :math:`\\beta` : trainable deviation parameter
+
+    - :math:`\epsilon` : add a smaller value to the variance to prevent division by zero
+    - :math:`\gamma` : trainable proportional parameter
+    - :math:`\beta` : trainable deviation parameter
 
     Parameters:
         num_channels(int): Indicate the number of channels of the input ``Tensor``.
@@ -1216,6 +1275,7 @@ class BatchNorm(layers.Layer):
         self._param_attr = param_attr
         self._bias_attr = bias_attr
         self._act = act
+        self._use_mkldnn = _global_flags()["FLAGS_use_mkldnn"]
 
         assert bias_attr is not False, "bias_attr should not be False in batch_norm."
 
@@ -1280,15 +1340,15 @@ class BatchNorm(layers.Layer):
         if in_dygraph_mode():
             attrs = ("momentum", self._momentum, "epsilon", self._epsilon,
                      "is_test", not self.training, "data_layout",
-                     self._data_layout, "use_mkldnn", False, "fuse_with_relu",
-                     self._fuse_with_relu, "use_global_stats",
+                     self._data_layout, "use_mkldnn", self._use_mkldnn,
+                     "fuse_with_relu", self._fuse_with_relu, "use_global_stats",
                      self._use_global_stats, 'trainable_statistics',
                      self._trainable_statistics)
-            batch_norm_out, _, _, _, _ = core.ops.batch_norm(
+            batch_norm_out, _, _, _, _, _ = _C_ops.batch_norm(
                 input, self.weight, self.bias, self._mean, self._variance,
                 mean_out, variance_out, *attrs)
             return dygraph_utils._append_activation_in_dygraph(
-                batch_norm_out, act=self._act)
+                batch_norm_out, act=self._act, use_mkldnn=self._use_mkldnn)
 
         check_variable_and_dtype(input, 'input',
                                  ['float16', 'float32', 'float64'], 'BatchNorm')
@@ -1316,6 +1376,9 @@ class BatchNorm(layers.Layer):
             dtype=self._dtype, stop_gradient=True)
         saved_variance = self._helper.create_variable_for_type_inference(
             dtype=self._dtype, stop_gradient=True)
+        reserve_space = self._helper.create_variable_for_type_inference(
+            dtype=self._helper.input_dtype(input), stop_gradient=True)
+
         batch_norm_out = input if self._in_place else self._helper.create_variable_for_type_inference(
             self._dtype)
 
@@ -1326,6 +1389,8 @@ class BatchNorm(layers.Layer):
             "SavedMean": [saved_mean],
             "SavedVariance": [saved_variance]
         }
+        if reserve_space is not None:
+            outputs["ReserveSpace"] = [reserve_space]
 
         self._helper.append_op(
             type="batch_norm", inputs=inputs, outputs=outputs, attrs=attrs)
@@ -1413,6 +1478,9 @@ class Dropout(layers.Layer):
         self._is_test = is_test
 
     def forward(self, input):
+        # fast return for p == 0
+        if self._dropout_prob == 0:
+            return input
         prog = default_main_program()
         if (self._seed is None or self._seed == 0) and prog.random_seed != 0:
             self._seed = prog.random_seed
@@ -1427,7 +1495,7 @@ class Dropout(layers.Layer):
 
         if in_dygraph_mode():
             attrs = sum(attrs.items(), ())
-            out, mask = core.ops.dropout(input, *attrs)
+            out, mask = _C_ops.dropout(input, *attrs)
             return out
 
         out = self._helper.create_variable_for_type_inference(dtype=input.dtype)
@@ -1444,7 +1512,11 @@ class Dropout(layers.Layer):
 
 
 class Embedding(layers.Layer):
-    """
+    r"""
+    :alias_main: paddle.nn.Embedding
+	:alias: paddle.nn.Embedding,paddle.nn.layer.Embedding,paddle.nn.layer.common.Embedding
+	:old_api: paddle.fluid.dygraph.Embedding
+
     **Embedding Layer**
 
     This interface is used to construct a callable object of the ``Embedding`` class.
@@ -1575,7 +1647,7 @@ class Embedding(layers.Layer):
 
     def forward(self, input):
         if in_dygraph_mode():
-            return core.ops.lookup_table_v2(
+            return _C_ops.lookup_table_v2(
                 self.weight, input, 'is_sparse', self._is_sparse,
                 'is_distributed', self._is_distributed, 'remote_prefetch',
                 self._remote_prefetch, 'padding_idx', self._padding_idx)
@@ -1600,7 +1672,11 @@ class Embedding(layers.Layer):
 
 
 class LayerNorm(layers.Layer):
-    """
+    r"""
+    :alias_main: paddle.nn.LayerNorm
+	:alias: paddle.nn.LayerNorm,paddle.nn.layer.LayerNorm,paddle.nn.layer.norm.LayerNorm
+	:old_api: paddle.fluid.dygraph.LayerNorm
+
     This interface is used to construct a callable object of the ``LayerNorm`` class.
     For more details, refer to code examples.
     It implements the function of the Layer Normalization Layer and can be applied to mini-batch input data.
@@ -1725,7 +1801,7 @@ class LayerNorm(layers.Layer):
                     1:] + ', but got input shape ' + str(input_shape))
 
         if in_dygraph_mode():
-            pre_act, _, _ = core.ops.layer_norm(
+            pre_act, _, _ = _C_ops.layer_norm(
                 input, self.weight, self.bias, 'epsilon', self._epsilon,
                 'begin_norm_axis', self._begin_norm_axis)
             return dygraph_utils._append_activation_in_dygraph(
@@ -1910,7 +1986,7 @@ class GRUUnit(layers.Layer):
 
     def forward(self, input, hidden):
         if in_dygraph_mode():
-            gate, reset_hidden_pre, updated_hidden = core.ops.gru_unit(
+            gate, reset_hidden_pre, updated_hidden = _C_ops.gru_unit(
                 input, hidden, self.weight, self.bias, 'activation',
                 self.activation, 'gate_activation', self.gate_activation)
             return updated_hidden, reset_hidden_pre, gate
@@ -2186,7 +2262,7 @@ class NCE(layers.Layer):
 
 
 class PRelu(layers.Layer):
-    """
+    r"""
     This interface is used to construct a callable object of the ``PRelu`` class.
     For more details, refer to code examples.
     It implements three activation methods of the ``PRelu`` activation function.
@@ -2294,7 +2370,8 @@ class PRelu(layers.Layer):
 
 
 class BilinearTensorProduct(layers.Layer):
-    """
+    r"""
+
     **Add Bilinear Tensor Product Layer**
 
     This layer performs bilinear tensor product on two inputs.
@@ -2330,21 +2407,21 @@ class BilinearTensorProduct(layers.Layer):
         **bias** (Parameter): the learnable bias of this layer.
 
     Returns:
-       Variable: A 2-D Tensor of shape [batch_size, size].
+       Tensor: A 2-D Tensor of shape [batch_size, size].
 
     Examples:
        .. code-block:: python
 
-         import paddle.fluid as fluid
-         import numpy
+        import paddle
+        import numpy
 
-         with fluid.dygraph.guard():
-             layer1 = numpy.random.random((5, 5)).astype('float32')
-             layer2 = numpy.random.random((5, 4)).astype('float32')
-             bilinearTensorProduct = fluid.dygraph.nn.BilinearTensorProduct(
-                    input1_dim=5, input2_dim=4, output_dim=1000)
-             ret = bilinearTensorProduct(fluid.dygraph.base.to_variable(layer1),
-                                fluid.dygraph.base.to_variable(layer2))
+        layer1 = numpy.random.random((5, 5)).astype('float32')
+        layer2 = numpy.random.random((5, 4)).astype('float32')
+        bilinearTensorProduct = paddle.nn.BilinearTensorProduct(
+            input1_dim=5, input2_dim=4, output_dim=1000)
+        ret = bilinearTensorProduct(paddle.to_tensor(layer1),
+                                    paddle.to_tensor(layer2))
+
     """
 
     def __init__(self,
@@ -2380,6 +2457,10 @@ class BilinearTensorProduct(layers.Layer):
             dtype=self._dtype,
             is_bias=True)
 
+    @deprecated(
+        since="2.0.0",
+        update_to="paddle.nn.Bilinear",
+        reason="New name and new args in Bilinear, easier to use.")
     def forward(self, x, y):
         check_variable_and_dtype(x, 'x', ['float32', 'float64'],
                                  'BilinearTensorProduct')
@@ -2406,7 +2487,7 @@ class BilinearTensorProduct(layers.Layer):
 
 
 class Conv2DTranspose(layers.Layer):
-    """
+    r"""
     This interface is used to construct a callable object of the ``Conv2DTranspose`` class.
     For more details, refer to code examples.
     The convolution2D transpose layer calculates the output based on the input,
@@ -2480,7 +2561,7 @@ class Conv2DTranspose(layers.Layer):
         dilation(int or tuple, optional): The dilation size. If dilation is a tuple, it must
             contain two integers, (dilation_H, dilation_W). Otherwise, the
             dilation_H = dilation_W = dilation. Default: 1.
-        groups(int, optional): The groups number of the Conv2d transpose layer. Inspired by
+        groups(int, optional): The groups number of the Conv2D transpose layer. Inspired by
             grouped convolution in Alex Krizhevsky's Deep CNN paper, in which
             when group=2, the first half of the filters is only connected to the
             first half of the input channels, while the second half of the
@@ -2591,7 +2672,7 @@ class Conv2DTranspose(layers.Layer):
 
     def forward(self, input):
         if in_dygraph_mode():
-            op = getattr(core.ops, self._op_type)
+            op = getattr(_C_ops, self._op_type)
             out = op(input, self.weight, 'output_size', self._output_size,
                      'strides', self._stride, 'paddings', self._padding,
                      'dilations', self._dilation, 'groups', self._groups,
@@ -2815,6 +2896,10 @@ class RowConv(layers.Layer):
 
 class GroupNorm(layers.Layer):
     """
+    :alias_main: paddle.nn.GroupNorm
+	:alias: paddle.nn.GroupNorm,paddle.nn.layer.GroupNorm,paddle.nn.layer.norm.GroupNorm
+	:old_api: paddle.fluid.dygraph.GroupNorm
+
     This interface is used to construct a callable object of the ``GroupNorm`` class.
     For more details, refer to code examples.
     It implements the function of the Group Normalization Layer.
@@ -2914,7 +2999,7 @@ class GroupNorm(layers.Layer):
 
 
 class SpectralNorm(layers.Layer):
-    """
+    r"""
     This interface is used to construct a callable object of the ``SpectralNorm`` class.
     For more details, refer to code examples. It implements the function of the Spectral Normalization Layer.
     This layer calculates the spectral normalization value of weight parameters of
@@ -2932,9 +3017,9 @@ class SpectralNorm(layers.Layer):
 
     .. math::
 
-        \mathbf{v} := \\frac{\mathbf{W}^{T} \mathbf{u}}{\|\mathbf{W}^{T} \mathbf{u}\|_2}
+        \mathbf{v} := \frac{\mathbf{W}^{T} \mathbf{u}}{\|\mathbf{W}^{T} \mathbf{u}\|_2}
 
-        \mathbf{u} := \\frac{\mathbf{W}^{T} \mathbf{v}}{\|\mathbf{W}^{T} \mathbf{v}\|_2}
+        \mathbf{u} := \frac{\mathbf{W}^{T} \mathbf{v}}{\|\mathbf{W}^{T} \mathbf{v}\|_2}
 
     Step 3:
     Calculate :math:`\sigma(\mathbf{W})` and normalize weight values.
@@ -2943,7 +3028,7 @@ class SpectralNorm(layers.Layer):
 
         \sigma(\mathbf{W}) = \mathbf{u}^{T} \mathbf{W} \mathbf{v}
 
-        \mathbf{W} = \\frac{\mathbf{W}}{\sigma(\mathbf{W})}
+        \mathbf{W} = \frac{\mathbf{W}}{\sigma(\mathbf{W})}
 
 
     Refer to `Spectral Normalization <https://arxiv.org/abs/1802.05957>`_ .
@@ -2962,13 +3047,13 @@ class SpectralNorm(layers.Layer):
     Examples:
        .. code-block:: python
 
-            import paddle.fluid as fluid
-            import numpy as np
+            import paddle
+            x = paddle.rand((2,8,32,32))
 
-            with fluid.dygraph.guard():
-                weight = np.random.random((2, 8, 32, 32)).astype('float32')
-                spectralNorm = fluid.dygraph.nn.SpectralNorm(weight.shape, dim=1, power_iters=2)
-                ret = spectralNorm(fluid.dygraph.base.to_variable(weight))
+            spectral_norm = paddle.nn.SpectralNorm(x.shape, dim=1, power_iters=2)
+            spectral_norm_out = spectral_norm(x)
+
+            print(spectral_norm_out.shape) # [2, 8, 32, 32]
 
     """
 
@@ -2985,6 +3070,12 @@ class SpectralNorm(layers.Layer):
         self._dtype = dtype
 
         self._weight_shape = list(weight_shape)
+        assert np.prod(self._weight_shape) > 0,\
+            "Any dimension of `weight_shape` cannot be equal to 0."
+        assert dim < len(self._weight_shape), \
+            ("The input `dim` should be less than the "
+            "length of `weight_shape`, but received dim="
+            "{}".format(dim))
         h = self._weight_shape[self._dim]
         w = np.prod(self._weight_shape) // h
 
@@ -3130,448 +3221,39 @@ class TreeConv(layers.Layer):
         return self._helper.append_activation(pre_activation, act=self._act)
 
 
-class MSELoss(layers.Layer):
+class Flatten(layers.Layer):
     """
-    **Mean Square Error Loss**
-    Computes the mean square error (squared L2 norm) of given input and label.
-
-    If :attr:`reduction` is set to ``'none'``, loss is calculated as:
-
-    .. math::
-        Out = (input - label)^2
-
-    If :attr:`reduction` is set to ``'mean'``, loss is calculated as:
-
-    .. math::
-        Out = \operatorname{mean}((input - label)^2)
-
-    If :attr:`reduction` is set to ``'sum'``, loss is calculated as:
-
-    .. math::
-        Out = \operatorname{sum}((input - label)^2)
-
-    where `input` and `label` are `float32` tensors of same shape.
+    This interface is used to construct a callable object of the ``FLatten`` class.
+    For more details, refer to code examples.
+    It implements flatten a contiguous range of dims into a tensor.
 
     Parameters:
-        input (Variable): Input tensor, the data type is float32,
-        label (Variable): Label tensor, the data type is float32,
-        reduction (string, optional): The reduction method for the output,
-            could be 'none' | 'mean' | 'sum'.
-            If :attr:`reduction` is ``'mean'``, the reduced mean loss is returned. 
-            If :attr:`size_average` is ``'sum'``, the reduced sum loss is returned. 
-            If :attr:`reduction` is ``'none'``, the unreduced loss is returned. 
-            Default is ``'mean'``.
-
+        start_axis(int): first dim to flatten (default = 1)
+        stop_axis(int): last dim to flatten (default = -1).
+    
     Returns:
-        The tensor variable storing the MSE loss of input and label.
+        None
 
-    Return type:
-        Variable.
-
-    Examples:
-        .. code-block:: python
-
-            import numpy as np
-            from paddle import fluid
-            import paddle.fluid.dygraph as dg
-
-            mse_loss = fluid.dygraph.MSELoss()
-            input = fluid.data(name="input", shape=[1])
-            label = fluid.data(name="label", shape=[1])
-            place = fluid.CPUPlace()
-            input_data = np.array([1.5]).astype("float32")
-            label_data = np.array([1.7]).astype("float32")
-
-            # declarative mode
-            output = mse_loss(input,label)
-            exe = fluid.Executor(place)
-            exe.run(fluid.default_startup_program())
-            output_data = exe.run(
-                fluid.default_main_program(),
-                feed={"input":input_data, "label":label_data},
-                fetch_list=[output],
-                return_numpy=True)
-            print(output_data)
-            # [array([0.04000002], dtype=float32)]
-
-            # imperative mode
-            with dg.guard(place) as g:
-                input = dg.to_variable(input_data)
-                label = dg.to_variable(label_data)
-                output = mse_loss(input, label)
-                print(output.numpy())
-                # [0.04000002]
-    """
-
-    def __init__(self, reduction='mean'):
-        super(MSELoss, self).__init__()
-        if reduction not in ['sum', 'mean', 'none']:
-            raise ValueError(
-                "'reduction' in 'MSELoss' should be 'sum', 'mean' or 'none', "
-                "but received {}.".format(reduction))
-        self.reduction = reduction
-
-    def forward(self, input, label):
-        if not in_dygraph_mode():
-            check_variable_and_dtype(input, 'input', ['float32'], 'MSELoss')
-            check_variable_and_dtype(label, 'label', ['float32'], 'MSELoss')
-
-        square_out = square(F.elementwise_sub(input, label))
-        if self.reduction == 'none':
-            return square_out
-
-        reduce_op = 'reduce_mean'
-        if self.reduction == 'sum':
-            reduce_op = 'reduce_sum'
-
-        return getattr(F, reduce_op)(square_out)
-
-
-class L1Loss(layers.Layer):
-    """
-    This interface is used to construct a callable object of the ``L1Loss`` class.
-    The L1Loss layer calculates the L1 Loss of input predictions and target 
-    labels as follows.
-
-    If :attr:`reduction` set to ``'none'``, the unreduced loss is:
-    .. math::
-        Out = |input - label|
-    If :attr:`reduction` set to ``'mean'``, the reduced mean loss is:
-    .. math::
-        Out = MEAN(|input - label|)
-    If :attr:`reduction` set to ``'sum'``, the reduced sum loss is:
-    .. math::
-        Out = SUM(|input - label|)
-
-    The shape of input predictions and target labels are [N, *], where N is batch_size and `*` 
-    means any number of additional dimensions.
-    If :attr:`reduction` is ``'none'``, the shape of output loss is [N, *], the same as input.
-    If :attr:`reduction` is ``'mean'`` or ``'sum'``, the shape of output loss is [1], which means the output is a scalar.
-    
-    Parameters:
-        reduction (str, optional): Indicate the reduction to apply to the loss, 
-            the candicates are ``'none'`` | ``'mean'`` | ``'sum'``.
-            If :attr:`reduction` is ``'none'``, the unreduced loss is returned; 
-            If :attr:`reduction` is ``'mean'``, the reduced mean loss is returned. 
-            If :attr:`reduction` is ``'sum'``, the reduced sum loss is returned. 
-            Default is ``'mean'``.
-    Returns:
-        A callable object of L1Loss.
-    Examples:
-        .. code-block:: python
-            # declarative mode
-            import paddle.fluid as fluid
-            import numpy as np
-            input = fluid.data(name="input", shape=[1])
-            label = fluid.data(name="label", shape=[1])
-            l1_loss = fluid.dygraph.L1Loss(reduction='mean')
-            output = l1_loss(input,label)
-            place = fluid.CPUPlace()
-            exe = fluid.Executor(place)
-            exe.run(fluid.default_startup_program())
-    
-            input_data = np.array([1.5]).astype("float32")
-            label_data = np.array([1.7]).astype("float32")
-            output_data = exe.run(fluid.default_main_program(),
-                    feed={"input":input_data, "label":label_data},
-                    fetch_list=[output],
-                    return_numpy=True)
-    
-            print(output_data)  # [array([0.2], dtype=float32)]
-            
-            # imperative mode
-            import paddle.fluid.dygraph as dg
-            with dg.guard(place) as g:
-                input = dg.to_variable(input_data)
-                label = dg.to_variable(label_data)
-                l1_loss = fluid.dygraph.L1Loss(reduction='mean')
-                output = l1_loss(input,label)
-                print(output.numpy())  # [0.2]
-    """
-
-    def __init__(self, reduction='mean'):
-        if reduction not in ['sum', 'mean', 'none']:
-            raise ValueError(
-                "The value of 'reduction' in L1Loss should be 'sum', 'mean' or 'none', but "
-                "received %s, which is not allowed." % reduction)
-        super(L1Loss, self).__init__()
-        self.reduction = reduction
-
-    def forward(self, input, label):
-        check_variable_and_dtype(
-            input, 'input', ['float32', 'float64', 'int32', 'int64'], 'l1_loss')
-        check_variable_and_dtype(
-            label, 'label', ['float32', 'float64', 'int32', 'int64'], 'l1_loss')
-
-        unreduced = F.elementwise_sub(input, label, act='abs')
-
-        if self.reduction == 'sum':
-            return F.reduce_sum(unreduced)
-        elif self.reduction == 'mean':
-            return F.reduce_mean(unreduced)
-        else:
-            return unreduced
-
-
-class BCELoss(layers.Layer):
-    """
-    This interface is used to construct a callable object of the ``BCELoss`` class.
-    The BCELoss layer measures the binary_cross_entropy loss between input predictions 
-    and target labels. The binary_cross_entropy loss can be described as:
-
-    If :attr:`weight` is set, the loss is:
-
-    .. math::
-        Out = -1 * weight * (label * log(input) + (1 - label) * log(1 - input))
-    If :attr:`weight` is None, the loss is:
-
-    .. math::
-        Out = -1 * (label * log(input) + (1 - label) * log(1 - input))
-
-    If :attr:`reduction` set to ``'none'``, the unreduced loss is:
-
-    .. math::
-        Out = Out
-    If :attr:`reduction` set to ``'mean'``, the reduced mean loss is:
-
-    .. math::
-        Out = MEAN(Out)
-    If :attr:`reduction` set to ``'sum'``, the reduced sum loss is:
-
-    .. math::
-        Out = SUM(Out)
-
-    Note that the input predictions always be the output of sigmoid, and the target labels 
-    should be numbers between 0 and 1.
-
-    The shape of input predictions and target labels are [N, *], where N is batch_size and `*` 
-    means any number of additional dimensions. If ``reduction`` is ``'none'``, the shape of 
-    output is scalar, else the shape of output is same as input.
-
-    Parameters:
-        weight (Variable, optional): A manual rescaling weight given to the loss of each 
-            batch element. If given, has to be a Variable of size nbatch and the data type
-            is float32, float64. Default is ``'None'``.
-        reduction (str, optional): Indicate how to average the loss by batch_size, 
-            the candicates are ``'none'`` | ``'mean'`` | ``'sum'``.
-            If :attr:`reduction` is ``'none'``, the unreduced loss is returned;
-            If :attr:`reduction` is ``'mean'``, the reduced mean loss is returned; 
-            If :attr:`reduction` is ``'sum'``, the summed loss is returned.
-            Default is ``'mean'``.
-
-    Returns: 
-        A callable object of BCELoss.
-
-    Examples:
-        .. code-block:: python
-
-            # declarative mode
-            import paddle.fluid as fluid
-            import numpy as np
-            input = fluid.data(name="input", shape=[3, 1], dtype='float32')
-            label = fluid.data(name="label", shape=[3, 1], dtype='float32')
-            bce_loss = fluid.dygraph.BCELoss()
-            output = bce_loss(input, label)
-            place = fluid.CPUPlace()
-            exe = fluid.Executor(place)
-            exe.run(fluid.default_startup_program())
-    
-            input_data = np.array([0.5, 0.6, 0.7]).astype("float32")
-            label_data = np.array([1.0, 0.0, 1.0]).astype("float32")
-            output_data = exe.run(fluid.default_main_program(),
-                    feed={"input":input_data, "label":label_data},
-                    fetch_list=[output],
-                    return_numpy=True)
-    
-            print(output_data)  # [array([0.65537095], dtype=float32)]
-            
-            # imperative mode
-            import paddle.fluid.dygraph as dg
-            with dg.guard(place) as g:
-                input = dg.to_variable(input_data)
-                label = dg.to_variable(label_data)
-                output = bce_loss(input, label)
-                print(output.numpy())  # [0.65537095]
-    """
-
-    def __init__(self, weight=None, reduction='mean'):
-        if reduction not in ['sum', 'mean', 'none']:
-            raise ValueError(
-                "The value of 'reduction' in bce_loss should be 'sum', 'mean' or 'none', but "
-                "received %s, which is not allowed." % reduction)
-
-        super(BCELoss, self).__init__()
-        self.weight = weight
-        self.reduction = reduction
-
-    def forward(self, input, label):
-        dtype = self._helper.input_dtype(input)
-
-        check_variable_and_dtype(input, 'input', ['float32', 'float64'],
-                                 'bce_loss')
-        check_variable_and_dtype(label, 'label', ['float32', 'float64'],
-                                 'bce_loss')
-
-        out = self._helper.create_variable_for_type_inference(dtype=input.dtype)
-        self._helper.append_op(
-            type='bce_loss',
-            inputs={
-                'X': [input],
-                'Label': [label],
-            },
-            outputs={'Out': [out]})
-
-        if self.weight is not None:
-            if isinstance(self.weight, Variable):
-                w = self.weight
-                out = F.elementwise_mul(out, w, axis=-1)
-            else:
-                raise ValueError(
-                    "The weight is not a Variable, please convert to Variable.")
-
-        if self.reduction == 'sum':
-            return F.reduce_sum(out)
-        elif self.reduction == 'mean':
-            return F.reduce_mean(out)
-        else:
-            return out
-
-
-class NLLLoss(layers.Layer):
-    """
-    This op accepts input and target label and returns negative log likelihood 
-    cross error. It is useful to train a classification problem with C classes.
-     
-    The input for the loss is epected to contain log-probabilities of
-    each classes. It hs to be a Tensor of size either (batch_size, C) or 
-    (batch_size, C, d1, d2, ..., dK) with K >= 1 for the K-dimensional case.
-    The label for the loss should be a class index in the range [0, C-1]
-    where C is the number of classes. If ignore_index is specified, the
-    specified target value does not contribute to the input gradient.
-    
-    If the optional argument `weight` is provided, it should be a 1D Tensor
-    assigning weight to each of the classed. This is particularly useful
-    when you have an unbalanced training set.
- 
-    The loss is calculated as follows.
-    The unreduced (i.e. with :attr:`reduction` set to ``'none'``) loss can be described as:
-
-    .. math::
-        \ell(x, y) = L = \{l_1,\dots,l_N\}^\\top, \quad
-        l_n = - w_{y_n} x_{n,y_n}, \quad
-        w_{c} = \\text{weight}[c] \cdot \mathbb{1}\{c \\not= \\text{ignore\\_index}\},
-
-    where :math:`N` is the batch size. If :attr:`reduction` is not ``'none'``
-    (default ``'mean'``), then
-
-    .. math::
-        \ell(x, y) = \\begin{cases}
-            \\sum_{n=1}^N \\frac{1}{\\sum_{n=1}^N w_{y_n}} l_n, &
-            \\text{if reduction} = \\text{'mean';}\\\\
-            \\sum_{n=1}^N l_n,  &
-            \\text{if reduction} = \\text{'sum'.}
-        \\end{cases}
-
-    Parameters:
-        input (Variable): Input tensor, the data type is float32, float64. 
-        label (Variable): Label tensor, the data type is int64_t.
-        weight (Variable, optional): Weight tensor, a manual rescaling weight given
-            to each class. If given, it has to be a Tensor of size `C`. Otherwise,
-            it treated as if having all ones. the data type is 
-            float32, float64, Default is ``'None'``.
-        reduction (str, optional): Indicate how to average the loss, 
-            the candicates are ``'none'`` | ``'mean'`` | ``'sum'``.
-            If :attr:`reduction` is ``'mean'``, the reduced mean loss is returned; 
-            Default is ``'mean'``.
-        ignore_index (int64, optional): Specifies a target value that is ignored
-            and does not contribute to the input gradient.
-
-    Returns:
-        The tensor variable storing the nll_loss.
-
-    Return type: Variable.
-    
     Examples:
 
         .. code-block:: python
 
-            # declarative mode
-            import paddle.fluid as fluid
-            import numpy as np
+          import paddle
+          import numpy as np
 
-            input_np = np.random.random(size=(10, 10)).astype(np.float32)
-            label_np = np.random.randint(0, 10, size=(10,)).astype(np.int64)
-            prog = fluid.Program()
-            startup_prog = fluid.Program()
-            place = fluid.CPUPlace()
-            with fluid.program_guard(prog, startup_prog):
-                input = fluid.data(name='input', shape=[10, 10], dtype='float32')
-                label = fluid.data(name='label', shape=[10], dtype='int64')
-                nll_loss = fluid.dygraph.NLLLoss()
-                res = nll_loss(input, label)
+          inp_np = np.ones([5, 2, 3, 4]).astype('float32')
+          inp_np = paddle.to_tensor(inp_np)
+          flatten = paddle.nn.Flatten(start_axis=1, stop_axis=2)
+          flatten_res = flatten(inp_np)
 
-                exe = fluid.Executor(place)
-                static_result = exe.run(
-                    prog,
-                    feed={"input": input_np,
-                          "label": label_np},
-                    fetch_list=[res])
-            print(static_result)
-            
-            # imperative mode
-            import paddle.fluid.dygraph as dg
-            with dg.guard(place) as g:
-                input = dg.to_variable(input_np)
-                label = dg.to_variable(label_np)
-                output = nll_loss(input, label)
-                print(output.numpy())
     """
 
-    def __init__(self, weight=None, reduction='mean', ignore_index=-100):
-        super(NLLLoss, self).__init__()
-        self.weight = weight
-        self.reduction = reduction
-        self.ignore_index = ignore_index
+    def __init__(self, start_axis=1, stop_axis=-1):
+        super(Flatten, self).__init__()
+        self.start_axis = start_axis
+        self.stop_axis = stop_axis
 
-    def forward(self, input, label):
-        dtype = self._helper.input_dtype(input)
-
-        check_variable_and_dtype(input, 'input', ['float32', 'float64'],
-                                 'nll_loss')
-        check_variable_and_dtype(label, 'label', ['int64'], 'nll_loss')
-
-        if self.reduction not in ['sum', 'mean', 'none']:
-            raise ValueError(
-                "The value of 'reduction' in nll_loss should be 'sum', 'mean' or 'none', but "
-                "received %s, which is not allowed." % self.reduction)
-
-        x_shape = list(input.shape)
-        n = x_shape[0]
-        c = x_shape[1]
-        x_dims = len(x_shape)
-        if x_dims < 2:
-            raise ValueError('Expected 2 or more dimensions (got {})'.format(
-                x_dims))
-        if x_dims != 2 and x_dims != 4:
-            input = F.reshape(input, shape=[n, c, 1, -1])
-            label = F.reshape(label, shape=[n, 1, -1])
-            out_shape = [n] + x_shape[2:]
-
-        inputs = {'X': input, 'Label': label}
-        attrs = {'reduction': self.reduction, 'ignore_index': self.ignore_index}
-
-        if self.weight is not None:
-            if isinstance(self.weight, Variable):
-                inputs['Weight'] = self.weight
-
-        out = self._helper.create_variable_for_type_inference(dtype=input.dtype)
-        total_weight = self._helper.create_variable_for_type_inference(
-            dtype=input.dtype)
-        outputs = {'Out': out, 'Total_weight': total_weight}
-
-        self._helper.append_op(
-            type='nll_loss', inputs=inputs, outputs=outputs, attrs=attrs)
-        if x_dims != 2 and x_dims != 4 and self.reduction == 'none':
-            out = F.reshape(out, shape=out_shape)
-
+    def forward(self, input):
+        out = paddle.tensor.manipulation.flatten(
+            input, start_axis=self.start_axis, stop_axis=self.stop_axis)
         return out

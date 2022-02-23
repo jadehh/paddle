@@ -14,6 +14,7 @@
 """Fleet Utils."""
 
 import collections
+import copy
 import json
 import logging
 import math
@@ -22,19 +23,18 @@ import os
 import sys
 import time
 import paddle.fluid as fluid
+from paddle.fluid import core
 from paddle.fluid.log_helper import get_logger
-from paddle.fluid.incubate.fleet.parameter_server.pslib import fleet as fleet_pslib
-from paddle.fluid.incubate.fleet.parameter_server.distribute_transpiler import fleet as fleet_transpiler
-from . import hdfs
-from .hdfs import *
+from paddle.distributed.fleet.utils.fs import LocalFS, HDFSClient
 from . import utils
+OpRole = core.op_proto_and_checker_maker.OpRole
 
 __all__ = ["FleetUtil"]
 
 _logger = get_logger(
-    __name__, logging.INFO, fmt='%(asctime)s-%(levelname)s: %(message)s')
+    __name__, logging.INFO, fmt='%(asctime)s %(levelname)s: %(message)s')
 
-fleet = fleet_pslib
+fleet = None
 
 
 class FleetUtil(object):
@@ -52,9 +52,13 @@ class FleetUtil(object):
 
     def __init__(self, mode="pslib"):
         global fleet
+        op_maker = core.op_proto_and_checker_maker
+        self.op_role_key = op_maker.kOpRoleAttrName()
         if mode == "pslib":
+            from paddle.fluid.incubate.fleet.parameter_server.pslib import fleet as fleet_pslib
             fleet = fleet_pslib
         elif mode == "transpiler":
+            from paddle.fluid.incubate.fleet.parameter_server.distribute_transpiler import fleet as fleet_transpiler
             fleet = fleet_transpiler
         else:
             raise ValueError(
@@ -149,7 +153,7 @@ class FleetUtil(object):
                          stat_pos="_generated_var_2",
                          stat_neg="_generated_var_3",
                          print_prefix=""):
-        """
+        r"""
         Print global auc of all distributed workers.
 
         Args:
@@ -240,7 +244,7 @@ class FleetUtil(object):
         new_pos = 0.0
         new_neg = 0.0
         total_ins_num = 0
-        for i in xrange(num_bucket):
+        for i in range(num_bucket):
             index = num_bucket - 1 - i
             new_pos = pos + global_pos[0][index]
             total_ins_num += global_pos[0][index]
@@ -431,11 +435,7 @@ class FleetUtil(object):
                         f.write(pre_content + "\n")
                         f.write(content + "\n")
                     client.delete(donefile_path)
-                    client.upload(
-                        output_path,
-                        donefile_name,
-                        multi_processes=1,
-                        overwrite=False)
+                    client.upload(donefile_name, output_path)
                     self.rank0_error("write %s/%s %s succeed" % \
                                       (day, pass_id, donefile_name))
                 else:
@@ -444,11 +444,7 @@ class FleetUtil(object):
             else:
                 with open(donefile_name, "w") as f:
                     f.write(content + "\n")
-                client.upload(
-                    output_path,
-                    donefile_name,
-                    multi_processes=1,
-                    overwrite=False)
+                client.upload(donefile_name, output_path)
                 self.rank0_error("write %s/%s %s succeed" % \
                                (day, pass_id, donefile_name))
         fleet._role_maker._barrier_worker()
@@ -543,11 +539,7 @@ class FleetUtil(object):
                         f.write(pre_content + "\n")
                         f.write(xbox_str + "\n")
                     client.delete(donefile_path)
-                    client.upload(
-                        output_path,
-                        donefile_name,
-                        multi_processes=1,
-                        overwrite=False)
+                    client.upload(donefile_name, output_path)
                     self.rank0_error("write %s/%s %s succeed" % \
                                       (day, pass_id, donefile_name))
                 else:
@@ -556,11 +548,7 @@ class FleetUtil(object):
             else:
                 with open(donefile_name, "w") as f:
                     f.write(xbox_str + "\n")
-                client.upload(
-                    output_path,
-                    donefile_name,
-                    multi_processes=1,
-                    overwrite=False)
+                client.upload(donefile_name, output_path)
                 self.rank0_error("write %s/%s %s succeed" % \
                                (day, pass_id, donefile_name))
         fleet._role_maker._barrier_worker()
@@ -634,11 +622,7 @@ class FleetUtil(object):
                            % (file_num, key_num)
                 with open(donefile_name, "w") as f:
                     f.write(meta_str)
-                client.upload(
-                    model_path,
-                    donefile_name,
-                    multi_processes=1,
-                    overwrite=False)
+                client.upload(donefile_name, model_path)
                 self.rank0_error("write %s succeed" % donefile_path)
         fleet._role_maker._barrier_worker()
 
@@ -958,7 +942,7 @@ class FleetUtil(object):
             if not client.is_exist(dest):
                 client.makedirs(dest)
 
-            client.upload(dest, model_name)
+            client.upload(model_name, dest, multi_processes=5, overwrite=True)
 
         fleet._role_maker._barrier_worker()
 
@@ -1055,12 +1039,8 @@ class FleetUtil(object):
                 dest = "%s/%s/delta-%s/dnn_plugin/" % (output_path, day,
                                                        pass_id)
             if not client.is_exist(dest):
-                client.makedirs(dest)
-
-            if os.path.isdir(model_name):
-                client.upload_dir(dest, model_name)
-            else:
-                client.upload(dest, model_name)
+                client.mkdirs(dest)
+            client.upload(model_name, dest, multi_processes=5, overwrite=True)
 
         fleet._role_maker._barrier_worker()
 
@@ -1069,7 +1049,7 @@ class FleetUtil(object):
                                 hadoop_fs_name,
                                 hadoop_fs_ugi,
                                 hadoop_home="$HADOOP_HOME"):
-        """
+        r"""
         get last saved base xbox info from xbox_base_done.txt
 
         Args:
@@ -1114,7 +1094,7 @@ class FleetUtil(object):
                            hadoop_fs_name,
                            hadoop_fs_ugi,
                            hadoop_home="$HADOOP_HOME"):
-        """
+        r"""
         get last saved xbox info from xbox_patch_done.txt
 
         Args:
@@ -1160,7 +1140,7 @@ class FleetUtil(object):
                             hadoop_fs_name,
                             hadoop_fs_ugi,
                             hadoop_home="$HADOOP_HOME"):
-        """
+        r"""
         get last saved model info from donefile.txt
 
         Args:
@@ -1236,15 +1216,15 @@ class FleetUtil(object):
         hours = os.popen("echo -n " + hours).read().split(" ")
         split_interval = int(split_interval)
         split_per_pass = int(split_per_pass)
-        splits_per_day = 24 * 60 / split_interval
-        pass_per_day = splits_per_day / split_per_pass
+        splits_per_day = 24 * 60 // split_interval
+        pass_per_day = splits_per_day // split_per_pass
         left_train_hour = int(hours[0])
         right_train_hour = int(hours[-1])
 
         start = 0
         split_path = []
         for i in range(splits_per_day):
-            h = start / 60
+            h = start // 60
             m = start % 60
             if h < left_train_hour or h > right_train_hour:
                 start += split_interval
@@ -1275,7 +1255,7 @@ class FleetUtil(object):
                            q_name="q",
                            pos_ins_num_name="pos",
                            total_ins_num_name="total"):
-        """
+        r"""
         get global metrics, including auc, bucket_error, mae, rmse,
         actual_ctr, predicted_ctr, copc, mean_predict_qvalue, total_ins_num.
 
@@ -1421,7 +1401,7 @@ class FleetUtil(object):
         relative_ctr_error = 0.0
         k_max_span = 0.01
         k_relative_error_bound = 0.05
-        for i in xrange(num_bucket):
+        for i in range(num_bucket):
             click = global_pos[0][i]
             show = global_pos[0][i] + global_neg[0][i]
             ctr = float(i) / num_bucket
@@ -1465,7 +1445,7 @@ class FleetUtil(object):
                              pos_ins_num_name="pos",
                              total_ins_num_name="total",
                              print_prefix=""):
-        """
+        r"""
         print global metrics, including auc, bucket_error, mae, rmse,
         actual_ctr, predicted_ctr, copc, mean_predict_qvalue, total_ins_num.
 
@@ -1615,3 +1595,129 @@ class FleetUtil(object):
         """
         program = utils.load_program(prog_path, is_text)
         utils.parse_program(program, output_dir)
+
+    def _is_optimizer_op(self, op):
+        return self.op_role_key in op.attr_names and \
+                int(op.all_attrs()[self.op_role_key]) & int(OpRole.Optimize)
+
+    def split_program_by_device(self, program):
+        ops_list = []
+        type_list = []
+        pre = None
+        type_cpu = "cpu"
+        for op in program.global_block().ops:
+            if self._is_optimizer_op(op):
+                break
+            if op.has_attr("op_device"):
+                cur_attr = op.attr("op_device") if op.attr(
+                    "op_device") != "" else type_cpu
+                if pre is None or pre != cur_attr:
+                    ops_list.append([])
+                    type_list.append(cur_attr)
+                ops_list[-1].append(op)
+                pre = cur_attr
+        l = len(type_list)
+        i = 0
+        type_heter = None
+        while i < l:
+            while i < l and type_list[i] == type_cpu:
+                i += 1
+            if i == l:
+                break
+
+            type_heter = type_list[i]
+            i += 1
+            start = i
+            valid = True
+            while i < l and type_list[i] != type_heter:
+                if type_list[i] != type_cpu:
+                    valid = False
+                    break
+                i += 1
+
+            if i == l:
+                break
+            elif not valid:
+                continue
+
+            for j in range(start, i):
+                for op in ops_list[j]:
+                    op._set_attr("op_device", type_heter)
+                type_list[j] = type_heter
+                j += 1
+
+        pre = None
+        merged_ops_list = []
+        merged_type_list = []
+        for i in range(l):
+            if pre is None or pre != type_list[i]:
+                merged_ops_list.append([])
+                merged_type_list.append(type_list[i])
+            merged_ops_list[-1].extend(ops_list[i])
+            pre = type_list[i]
+
+        data_vars = set()
+        for k in program.global_block().vars:
+            var = program.global_block().var(k)
+            if not var.persistable:
+                data_vars.add(var.name)
+
+        l = len(merged_ops_list)
+        inputs_pre = set()
+        outputs_pre = set()
+        in_from_pre = [[] for i in range(l)]
+        for i in range(l):
+            inputs = set()
+            outputs = set()
+            for op in merged_ops_list[i]:
+                for input in op.input_names:
+                    for tmp in op.input(input):
+                        if tmp not in outputs:
+                            inputs.add(tmp)
+                for output in op.output_names:
+                    for tmp in op.output(output):
+                        outputs.add(tmp)
+            if i == 0:
+                in_from_pre[i] = []
+            elif i == 1:
+                in_from_pre[i] = (outputs_pre | data_vars) & inputs
+            else:
+                in_from_pre[i] = outputs_pre & inputs
+            inputs_pre = copy.deepcopy(inputs)
+            outputs_pre = copy.deepcopy(outputs)
+
+        l = len(in_from_pre)
+        start_list = []
+        end_list = []
+        send_list = [[] for i in range(l)]
+        sum = 0
+        program_list = []
+        for i in range(l):
+            start_list.append(sum)
+            end_list.append(sum + len(merged_ops_list[i]) - 1)
+            sum += len(merged_ops_list[i])
+            if i < l - 1:
+                send_list[i].extend(list(in_from_pre[i + 1]))
+            prog = program.clone()
+            if merged_type_list[i] != type_cpu:
+                prog = prog._prune_with_input(
+                    list(in_from_pre[i]), list(send_list[i]))
+                program_list.append(prog)
+            else:
+                program_list.append(prog)
+        recv_list = [list(i) for i in in_from_pre]
+        found = False
+        heter_index = None
+        for i in range(len(merged_type_list)):
+            t = merged_type_list[i]
+            if t != type_cpu:
+                if found:
+                    print("only one region of program can be heter")
+                found = True
+                heter_index = i
+        if heter_index is None:
+            print("warning: non heter program")
+            return None
+        else:
+            return [start_list[heter_index], end_list[heter_index], send_list[heter_index], \
+                    recv_list[heter_index], program_list[heter_index]]

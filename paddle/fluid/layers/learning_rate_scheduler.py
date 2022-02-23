@@ -52,6 +52,7 @@ def _decay_step_counter(begin=0):
 
 def noam_decay(d_model, warmup_steps, learning_rate=1.0):
     """
+
     Noam decay method. The numpy implementation of noam decay as follows.
 
     .. code-block:: python
@@ -111,6 +112,7 @@ def noam_decay(d_model, warmup_steps, learning_rate=1.0):
 
 def exponential_decay(learning_rate, decay_steps, decay_rate, staircase=False):
     """
+
     Applies exponential decay to the learning rate.
 
     When training a model, it is often recommended to lower the learning rate as the
@@ -141,6 +143,9 @@ def exponential_decay(learning_rate, decay_steps, decay_rate, staircase=False):
         .. code-block:: python
 
           import paddle.fluid as fluid
+          import paddle
+
+          paddle.enable_static()
           base_lr = 0.1
           sgd_optimizer = fluid.optimizer.SGD(
 	      learning_rate=fluid.layers.exponential_decay(
@@ -167,7 +172,9 @@ def exponential_decay(learning_rate, decay_steps, decay_rate, staircase=False):
 
 
 def natural_exp_decay(learning_rate, decay_steps, decay_rate, staircase=False):
-    """Applies natural exponential decay to the initial learning rate.
+    """
+
+Applies natural exponential decay to the initial learning rate.
 
     When training a model, it is often recommended to lower the learning rate as the
     training progresses. By using this function, the learning rate will be decayed by
@@ -197,6 +204,9 @@ def natural_exp_decay(learning_rate, decay_steps, decay_rate, staircase=False):
         .. code-block:: python
 
           import paddle.fluid as fluid
+          import paddle
+
+          paddle.enable_static()
           base_lr = 0.1
           sgd_optimizer = fluid.optimizer.SGD(
 	      learning_rate=fluid.layers.natural_exp_decay(
@@ -224,6 +234,7 @@ def natural_exp_decay(learning_rate, decay_steps, decay_rate, staircase=False):
 
 def inverse_time_decay(learning_rate, decay_steps, decay_rate, staircase=False):
     """
+
     Applies inverse time decay to the initial learning rate.
 
     When training a model, it is often recommended to lower the learning rate as the
@@ -254,6 +265,8 @@ def inverse_time_decay(learning_rate, decay_steps, decay_rate, staircase=False):
         .. code-block:: python
 
           import paddle.fluid as fluid
+          import paddle
+          paddle.enable_static()
           base_lr = 0.1
           sgd_optimizer = fluid.optimizer.SGD(
 	      learning_rate=fluid.layers.inverse_time_decay(
@@ -349,7 +362,9 @@ def polynomial_decay(learning_rate,
 
 
 def piecewise_decay(boundaries, values):
-    """Applies piecewise decay to the initial learning rate.
+    """
+
+Applies piecewise decay to the initial learning rate.
 
     The algorithm can be described as the code below.
 
@@ -375,6 +390,8 @@ def piecewise_decay(boundaries, values):
         .. code-block:: python
 
           import paddle.fluid as fluid
+          import paddle
+          paddle.enable_static()
           boundaries = [10000, 20000]
           values = [1.0, 0.5, 0.1]
           optimizer = fluid.optimizer.Momentum(
@@ -408,22 +425,25 @@ def piecewise_decay(boundaries, values):
                         dtype='float32',
                         value=float(boundaries[i]),
                         force_cpu=True)
-                    value_var = tensor.fill_constant(
-                        shape=[1], dtype='float32', value=float(values[i]))
                     with switch.case(global_step < boundary_val):
-                        tensor.assign(value_var, lr)
-                last_value_var = tensor.fill_constant(
-                    shape=[1],
-                    dtype='float32',
-                    value=float(values[len(values) - 1]))
+                        tensor.fill_constant(
+                            shape=[1],
+                            dtype="float32",
+                            value=float(values[i]),
+                            out=lr)
                 with switch.default():
-                    tensor.assign(last_value_var, lr)
+                    tensor.fill_constant(
+                        shape=[1],
+                        dtype="float32",
+                        value=float(values[len(values) - 1]),
+                        out=lr)
 
             return lr
 
 
 def cosine_decay(learning_rate, step_each_epoch, epochs):
-    """
+    r"""
+
     Applies cosine decay to the learning rate.
 
     when training a model, it is often recommended to lower the learning rate as the
@@ -469,6 +489,7 @@ def cosine_decay(learning_rate, step_each_epoch, epochs):
 
 def linear_lr_warmup(learning_rate, warmup_steps, start_lr, end_lr):
     """
+
     This operator use the linear learning rate warm up strategy to adjust the learning rate preliminarily before the normal learning rate scheduling.
     For more information, please refer to `Bag of Tricks for Image Classification with Convolutional Neural Networks <https://arxiv.org/abs/1812.01187>`_
     
@@ -497,6 +518,7 @@ def linear_lr_warmup(learning_rate, warmup_steps, start_lr, end_lr):
     
     Returns:
         Variable: Warm-up learning rate with the same data type as learning_rate.
+    
     
     Examples:
     

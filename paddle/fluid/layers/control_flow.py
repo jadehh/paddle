@@ -18,7 +18,7 @@ from ..wrapped_decorator import signature_safe_contextmanager
 from .layer_function_generator import autodoc, templatedoc
 from .tensor import assign, cast, fill_constant
 from .. import core
-from ..framework import Program, Variable, Operator, in_dygraph_mode
+from ..framework import Program, Variable, Operator, in_dygraph_mode, static_only
 from ..layer_helper import LayerHelper, unique_name
 from .nn import logical_and, logical_not, logical_or
 from .utils import assert_same_structure, map_structure, hold_mutable_vars, copy_mutable_vars
@@ -29,13 +29,14 @@ from functools import reduce, partial
 from ..data_feeder import convert_dtype, check_variable_and_dtype, check_type, check_dtype
 from ... import compat as cpt
 from ..backward import _infer_var_data_type_shape_
+from paddle import _C_ops
 
 __all__ = [
     'While', 'Switch', 'increment', 'array_write', 'create_array', 'less_than',
     'less_equal', 'greater_than', 'greater_equal', 'equal', 'not_equal',
     'array_read', 'array_length', 'cond', 'IfElse', 'DynamicRNN', 'StaticRNN',
-    'reorder_lod_tensor_by_rank', 'Print', 'is_empty', 'case', 'switch_case',
-    'while_loop'
+    'reorder_lod_tensor_by_rank', 'Print', 'Assert', 'is_empty', 'case',
+    'switch_case', 'while_loop'
 ]
 
 
@@ -211,6 +212,7 @@ def merge_lod_tensor(in_true, in_false, x, mask, level=0):
     return out
 
 
+@static_only
 def Print(input,
           first_n=-1,
           message=None,
@@ -218,9 +220,12 @@ def Print(input,
           print_tensor_name=True,
           print_tensor_type=True,
           print_tensor_shape=True,
+          print_tensor_layout=True,
           print_tensor_lod=True,
           print_phase='both'):
     '''
+    :api_attr: Static Graph
+
     **Print operator**
 
     This creates a print op that will print when a tensor is accessed.
@@ -238,6 +243,7 @@ def Print(input,
         print_tensor_name (bool, optional): Print the tensor name. Default: True.
         print_tensor_type (bool, optional): Print the tensor type. Defaultt: True.
         print_tensor_shape (bool, optional): Print the tensor shape. Default: True.
+        print_tensor_layout (bool, optional): Print the tensor layout. Default: True.
         print_tensor_lod (bool, optional): Print the tensor lod. Default: True.
         print_phase (str): Which phase to displace, including 'forward',
                 'backward' and 'both'. Default: 'both'. If set to 'backward', will 
@@ -255,24 +261,24 @@ def Print(input,
     Examples:
         .. code-block:: python
            
-           import paddle.fluid as fluid
-           
-           input = fluid.layers.fill_constant(shape=[10,2], value=3, dtype='int64')
-           input = fluid.layers.Print(input, message="The content of input layer:")
-           
-           main_program = fluid.default_main_program()
-           exe = fluid.Executor(fluid.CPUPlace())
-           exe.run(main_program)
+           import paddle
 
-    Output at runtime:
-        .. code-block:: bash 
-           
-           The content of input layer:     The place is:CPUPlace
-           Tensor[fill_constant_0.tmp_0]
-               shape: [10,2,]
-               dtype: x
-               data: 3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3, 
-               
+           paddle.enable_static()
+        
+           x = paddle.full(shape=[2, 3], fill_value=3, dtype='int64')
+           out = paddle.static.Print(x, message="The content of input layer:")
+
+           main_program = paddle.static.default_main_program()
+           exe = paddle.static.Executor(place=paddle.CPUPlace())
+           res = exe.run(main_program, fetch_list=[out])
+           # Variable: fill_constant_1.tmp_0
+           #   - message: The content of input layer:
+           #   - lod: {}
+           #   - place: CPUPlace
+           #   - shape: [2, 3]
+           #   - layout: NCHW
+           #   - dtype: long
+           #   - data: [3 3 3 3 3 3]
     '''
     check_variable_and_dtype(input, 'input',
                              ['float32', 'float64', 'int32', 'int64', 'bool'],
@@ -291,10 +297,83 @@ def Print(input,
             'print_tensor_name': print_tensor_name,
             'print_tensor_type': print_tensor_type,
             'print_tensor_shape': print_tensor_shape,
+            'print_tensor_layout': print_tensor_layout,
             'print_tensor_lod': print_tensor_lod,
             'print_phase': print_phase.upper()
         })
     return output
+
+
+def Assert(cond, data=None, summarize=20, name=None):
+    '''
+    This API creates an op that asserts the given condition is true. If the
+    condition is false, prints the tensors in data. ``summarize`` specifies the
+    number of the elements in the tensors to print.
+
+    Args:
+        cond (Variable): The boolean condition tensor whose numel should be 1.
+        data (list|tuple, optional): list or tuple of tensors to print when
+            condition is not true. If it's ``None``, no tensor will be printed.
+            The default value is ``None``.
+        summarize (int, optional): Number of elements in the tensor to be
+            printed. If its value is -1, then all elements in the tensor will
+            be printed. The default value is 20.
+        name (str, optional): The default value is ``None`` . Normally users
+            don't have to set this parameter. For more information, please
+            refer to :ref:`api_guide_Name` .
+
+    Returns:
+        Operator: the created operation.
+
+    Raises:
+        TypeError: If ``cond`` is not boolean Variable.
+        TypeError: If ``data`` is not a list or tuple or ``None``.
+        TypeError: If ``summarize`` is not int.
+        TypeError: If ``name`` is not a string or ``None`` .
+        fluid.core.EnforceNotMet: If the condition is False in running time.
+
+    Examples:
+        .. code-block:: python
+
+            import paddle.fluid as fluid
+            import paddle.fluid.layers as layers
+
+            x = layers.fill_constant(shape=[2, 3], dtype='float32', value=2.0)
+            condition = layers.reduce_max(x) < 1.0 # False
+            layers.Assert(condition, [x], 10, "example_assert_layer")
+
+            exe = fluid.Executor()
+            try:
+                exe.run(fluid.default_main_program())
+                # Print x and throws paddle.fluid.core.EnforceNotMet exception
+                # Example printed message for x:
+                #
+                # Variable: fill_constant_0.tmp_0
+                #   - lod: {}
+                #   - place: CPUPlace()
+                #   - shape: [2, 3]
+                #   - layout: NCHW
+                #   - dtype: float
+                #   - data: [2 2 2 2 2 2]
+            except fluid.core.EnforceNotMet as e:
+                print("Assert Exception Example")
+
+    '''
+    check_variable_and_dtype(cond, "cond", ["bool"], "fluid.layers.Assert")
+    check_type(data, "data", (list, tuple, type(None)), "fluid.layers.Assert")
+    check_type(summarize, "summarize", int, "fluid.layers.Assert")
+    check_type(name, "name", (str, type(None)), "fluid.layers.Assert")
+
+    layer_name = name if name else ('assert_' + cond.name)
+    helper = LayerHelper(layer_name, **locals())
+
+    op = helper.append_op(
+        type="assert",
+        inputs={"Cond": cond,
+                "Data": [] if data is None else list(data)},
+        attrs={"summarize": summarize})
+
+    return op
 
 
 class BlockGuard(object):
@@ -371,6 +450,8 @@ class StaticRNNMemoryLink(object):
 
 class StaticRNN(object):
     """
+    :api_attr: Static Graph
+
     StaticRNN class.
 
     The StaticRNN can process a batch of sequence data. The first dimension of inputs
@@ -846,20 +927,71 @@ class WhileGuard(BlockGuard):
         return super(WhileGuard, self).__exit__(exc_type, exc_val, exc_tb)
 
 
+def get_inputs_outputs_in_block(current_block, inner_inputs, inner_outputs,
+                                helper):
+    """
+    Find inputs and outputs in current control flow block.
+    :param current_block: Current control flow block.
+    :param inner_inputs: Input var name of ops in current block.
+    :param inner_outputs: Output var name of ops in current block.
+    :return: inner_inputs, inner_outputs
+    """
+
+    # Step1: update inner_inputs and inner_outputs
+    # NOTE: Here assumes that all variables are input or output of Ops,
+    # but some variables are created without appendding a real op.
+    # For example, in `arr = create_array(dtype)`, `arr` is not a output of a op.
+    for op in current_block.ops:
+        assert isinstance(op, Operator)
+        for iname in op.input_names:
+            for in_var_name in op.input(iname):
+                if in_var_name not in inner_outputs:
+                    inner_inputs.add(in_var_name)
+
+        for oname in op.output_names:
+            for out_var_name in op.output(oname):
+                inner_outputs.add(out_var_name)
+
+    # Step2: Remove LOD_TENSOR_ARRAY created in current control flow block.
+    remove_inner_inputs = set()
+    parent_block = helper.main_program.block(current_block.parent_idx)
+
+    for in_var_name in inner_inputs:
+        parent_block_var = parent_block._find_var_recursive(in_var_name)
+        current_block_var = None
+        if current_block.has_var(in_var_name):
+            current_block_var = current_block.var(in_var_name)
+        if not parent_block_var and current_block_var and \
+                current_block_var.type == core.VarDesc.VarType.LOD_TENSOR_ARRAY:
+            remove_inner_inputs.add(in_var_name)
+
+    inner_inputs = inner_inputs - remove_inner_inputs
+
+    return inner_inputs, inner_outputs
+
+
 class While(object):
     """
+    :api_attr: Static Graph
+    
     while loop control flow. Repeat while body until cond is False.
 
     Note:
         A new OP :ref:`api_fluid_layers_while_loop` is highly recommended instead of ``While`` if the shape of parameter ``cond`` is [1].
         OP :ref:`api_fluid_layers_while_loop` is easier to use and is called with less code but does the same thing as ``While`` .
 
+    Notice:
+        Local variables created in ``While`` are similar to that created in while of C++, and cannot be referenced externally.
+        As a result, they cannot be obtained through ``fetch_list`` of ``Executor``. If you would like to access the variable
+        out of ``while`` , PaddlePaddle provides ``assign`` API to assign local variables to external. Please refer to example
+        code 2 or refer to `issue#22724 <https://github.com/PaddlePaddle/Paddle/issues/22724>`_.
+
     Args:
         cond(Variable): A Tensor whose data type is bool controlling whether to continue looping.
         is_test(bool, optional): A flag indicating whether execution is in test phase. Default value is False.
         name(str, optional): The default value is None.  Normally there is no need for user to set this property.  For more information, please refer to :ref:`api_guide_Name` .
 
-    Examples:
+    Examples 1:
           .. code-block:: python
             
             import paddle.fluid as fluid
@@ -869,17 +1001,45 @@ class While(object):
 
             loop_len = fluid.layers.fill_constant(shape=[1],dtype='int64', value=10)    # loop length
 
-            cond = fluid.layers.less_than(x=i, y=loop_len)              
+            cond = fluid.layers.less_than(x=i, y=loop_len)
             while_op = fluid.layers.While(cond=cond)
-            with while_op.block():  
+            with while_op.block():
                 i = fluid.layers.increment(x=i, value=1, in_place=True)
-                fluid.layers.less_than(x=i, y=loop_len, cond=cond)      
+                fluid.layers.less_than(x=i, y=loop_len, cond=cond)
 
             exe = fluid.Executor(fluid.CPUPlace())
             exe.run(fluid.default_startup_program())
 
             res = exe.run(fluid.default_main_program(), feed={}, fetch_list=[i])
-            print(res) # [array([10])]           
+            print(res) # [array([10])]
+
+
+    Examples 2:
+          .. code-block:: python
+
+            import paddle.fluid as fluid
+            import numpy as np
+
+            i = fluid.layers.fill_constant(shape=[1], dtype='int64', value=0)
+            loop_len = fluid.layers.fill_constant(shape=[1], dtype='int64', value=10)
+            one = fluid.layers.fill_constant(shape=[1], dtype='float32', value=1)
+            data = fluid.data(name='data', shape=[1], dtype='float32')
+            sums = fluid.layers.fill_constant(shape=[1], dtype='float32', value=0)  # Define the variable to be obtained ouside of While, which name should be different from the variable inside the While to be obtained
+
+            cond = fluid.layers.less_than(x=i, y=loop_len)
+            while_op = fluid.layers.While(cond=cond)
+            with while_op.block():
+                sums_tensor = fluid.layers.elementwise_add(x=data, y=data)
+                fluid.layers.assign(sums_tensor, sums)  # Update the value of sums_tensor defined in While to the sums which defined outside of While through layers.assign
+                i = fluid.layers.increment(x=i, value=1, in_place=True)
+                data = fluid.layers.elementwise_add(x=data, y=one)
+                fluid.layers.less_than(x=i, y=loop_len, cond=cond)
+
+            feed_data = np.ones(1).astype('float32')
+            exe = fluid.Executor(fluid.CPUPlace())
+            exe.run(fluid.default_startup_program())
+            res = exe.run(fluid.default_main_program(), feed={'data': feed_data}, fetch_list=sums)
+            print(res[0])  # [2.]    # Because the data in While does not update the value outside the While, the value of sums is [2.] after the loop
     """
 
     BEFORE_WHILE_BLOCK = 0
@@ -889,14 +1049,10 @@ class While(object):
     def __init__(self, cond, is_test=False, name=None):
         self.helper = LayerHelper("while", name=name)
         self.status = While.BEFORE_WHILE_BLOCK
-        if not isinstance(cond, Variable):
-            raise TypeError("condition should be a variable")
-        assert isinstance(cond, Variable)
-        if cond.dtype != core.VarDesc.VarType.BOOL:
-            raise TypeError("condition should be a boolean variable")
+        check_variable_and_dtype(cond, 'cond', ['bool'], 'fluid.layers.While')
         if reduce(lambda a, b: a * b, cond.shape, 1) != 1:
             raise TypeError(
-                "condition expected shape as [], but given shape as {0}.".
+                "condition expected shape as [1], but given shape as {0}.".
                 format(list(cond.shape)))
         self.cond_var = cond
         self.is_test = is_test
@@ -912,15 +1068,8 @@ class While(object):
 
         inner_outputs = {self.cond_var.name}
         x_name_list = set()
-        for op in while_block.ops:
-            for iname in op.input_names:
-                for in_var_name in op.input(iname):
-                    if in_var_name not in inner_outputs:
-                        x_name_list.add(in_var_name)
-
-            for oname in op.output_names:
-                for out_var_name in op.output(oname):
-                    inner_outputs.add(out_var_name)
+        x_name_list, inner_outputs = get_inputs_outputs_in_block(
+            while_block, x_name_list, inner_outputs, self.helper)
 
         out_vars = []
         for inner_out_name in inner_outputs:
@@ -946,9 +1095,33 @@ class While(object):
                    "is_test": self.is_test})
 
 
+def assign_skip_lod_tensor_array(input, output):
+    """
+    Assign input to output, but skip the process of copying LoDTensorArray unless it's created in while_block.
+    """
+    if not isinstance(input, Variable) and not isinstance(input, core.VarBase):
+        output = input
+        return
+
+    if input.type == core.VarDesc.VarType.LOD_TENSOR_ARRAY:
+        main_program = input.block.program
+        parent_block = main_program.block(main_program.current_block()
+                                          .parent_idx)
+        if parent_block and not parent_block._find_var_recursive(input.name):
+            assign(input, output)
+    else:
+        assign(input, output)
+
+
 def while_loop(cond, body, loop_vars, is_test=False, name=None):
     """
+    :api_attr: Static Graph
+
     while_loop is one of the control flows. Repeats while_loop `body` until `cond` returns False.
+
+    Notice:
+        Local variables defined in ``body`` cannot be obtained through ``fetch_list`` of ``Executor`` , variables should
+        be defined outside ``body`` and placed in ``loop_vars`` for looping, then these variables can be fetched by ``fetch_list`` .
 
     Args:
         cond(Callable): A callable returning a boolean tensor controlling whether to continue looping. And ``cond`` takes
@@ -959,28 +1132,15 @@ def while_loop(cond, body, loop_vars, is_test=False, name=None):
         is_test(bool, optional): A flag indicating whether execution is in test phase. Default value is False.
         name(str, optional): Normally there is no need for users to set this property. For more information, please
             refer to :ref:`api_guide_Name`. Default is None.
-    
-    Returns:
-        A list or tuple of tensors or LoDTensorArrays which returned by ``body`` .
-    
-    Returen type:
-        list(Variable)|tuple(Variable).
 
-    Raises:
-        TypeError: If the type of ``cond`` is not callable.
-        TypeError: If the type of ``body`` is not callable.
-        TypeError: If the type of ``loop_vars`` is not list or tuple.
-        TypeError: If the type of ``cond`` returns is not Variable.
-        TypeError: If the type of ``cond`` returns is not a boolean variable.
-        TypeError: If the shape of ``cond`` returns is not equals 1.
-        ValueError: If the ``var_loops`` is empty.
-        ValueError: If the length or type of ``body`` returns is not same as ``loop_vars``.
+    Returns:
+        A list or tuple of Tensors or LoDTensorArrays which returned by ``body`` .
 
     Examples:
         .. code-block:: python
 
-            import paddle.fluid as fluid
-            import paddle.fluid.layers as layers
+            import paddle
+            paddle.enable_static()
 
             def cond(i, ten):
                 return i < ten
@@ -989,14 +1149,14 @@ def while_loop(cond, body, loop_vars, is_test=False, name=None):
                 i = i + 1
                 return [i, ten]
 
-            main_program = fluid.default_main_program()
-            startup_program = fluid.default_startup_program()
-            with fluid.program_guard(main_program, startup_program):
-                i = layers.fill_constant(shape=[1], dtype='int64', value=0)     # loop counter
-                ten = layers.fill_constant(shape=[1], dtype='int64', value=10)  # loop length
-                i, ten = layers.while_loop(cond, body, [i, ten])
+            main_program = paddle.static.default_main_program()
+            startup_program = paddle.static.default_startup_program()
+            with paddle.static.program_guard(main_program, startup_program):
+                i = paddle.full(shape=[1], fill_value=0, dtype='int64')     # loop counter
+                ten = paddle.full(shape=[1], fill_value=10, dtype='int64')  # loop length
+                i, ten = paddle.static.nn.while_loop(cond, body, [i, ten])
                 
-                exe = fluid.Executor(fluid.CPUPlace())
+                exe = paddle.static.Executor(paddle.CPUPlace())
                 res = exe.run(main_program, feed={}, fetch_list=[i])
                 print(res) # [array([10])]
     """
@@ -1006,19 +1166,16 @@ def while_loop(cond, body, loop_vars, is_test=False, name=None):
         raise TypeError("cond in while_loop should be callable")
     if not callable(body):
         raise TypeError("body in while_loop should be callable")
-    if not isinstance(loop_vars, (list, tuple)):
-        raise TypeError("loop_vars in while_loop should be a list or tuple")
+    check_type(loop_vars, 'loop_vars', (list, tuple), 'fluid.layers.while_loop')
     if len(loop_vars) == 0:
         raise ValueError("loop_vars in while_loop should not be empty")
 
     pre_cond = cond(*loop_vars)
-    if not isinstance(pre_cond, Variable):
-        raise TypeError("cond in while_loop should return a variable")
-    if pre_cond.dtype != core.VarDesc.VarType.BOOL:
-        raise TypeError("cond in while_loop should return a boolean variable")
+    check_variable_and_dtype(pre_cond, 'var of cond returned', ['bool'],
+                             'fluid.layers.while_loop')
     if reduce(lambda a, b: a * b, pre_cond.shape, 1) != 1:
         raise TypeError(
-            "the shape of the variable returned by cond should be [],"
+            "the shape of the variable returned by cond should be [1],"
             "but given shape as {0}.".format(list(pre_cond.shape)))
 
     if in_dygraph_mode():
@@ -1032,7 +1189,7 @@ def while_loop(cond, body, loop_vars, is_test=False, name=None):
                     "body in while_loop should return the same arity "
                     "(length and structure) and types as loop_vars")
             now_cond = cond(*output_vars).numpy()[0]
-            loop_vars = output_vars
+            map_structure(assign_skip_lod_tensor_array, output_vars, loop_vars)
         return loop_vars
 
     while_loop_block = While(pre_cond, is_test, name)
@@ -1056,7 +1213,7 @@ def while_loop(cond, body, loop_vars, is_test=False, name=None):
                              "(length and structure) as loop_vars: {0}".format(
                                  e))
         now_cond = cond(*output_vars)
-        map_structure(assign, output_vars, loop_vars)
+        map_structure(assign_skip_lod_tensor_array, output_vars, loop_vars)
         assign(now_cond, pre_cond)
     return loop_vars
 
@@ -1344,7 +1501,7 @@ def array_write(x, i, array=None):
         assert i.shape == [
             1
         ], "The shape of index 'i' should be [1] in dygraph mode"
-        i = i.numpy()[0]
+        i = i.numpy().item(0)
         if array is None:
             array = create_array(x.dtype)
         assert isinstance(
@@ -1381,7 +1538,7 @@ def array_write(x, i, array=None):
     return array
 
 
-def create_array(dtype):
+def create_array(dtype, initialized_list=None):
     """
     This OP creates an LOD_TENSOR_ARRAY. It is used as
     the input of :ref:`api_fluid_layers_array_read` and 
@@ -1391,6 +1548,8 @@ def create_array(dtype):
     Args:
         dtype (str): The data type of the elements in the lod_tensor_array.
                      Support data type: float32, float64, int32, int64.
+        initialized_list(list): Used to initialize as default value for created array.
+                    All values in initialized list should be a Tensor.
 
     Returns:
         Variable: The empty lod_tensor_array. The data type of elements in Tensor is ``dtype``.
@@ -1402,53 +1561,64 @@ def create_array(dtype):
           data = fluid.layers.create_array(dtype='float32') # Create a float32 LoDTensorArray.
 
     """
+    array = []
+    if initialized_list is not None:
+        if not isinstance(initialized_list, (list, tuple)):
+            raise TypeError(
+                "Require type(initialized_list) should be list/tuple, but received {}".
+                format(type(initialized_list)))
+        array = list(initialized_list)
+
+    # NOTE: Only support plain list like [x, y,...], not support nested list in static mode.
+    for val in array:
+        if not isinstance(val, Variable):
+            raise TypeError(
+                "All values in `initialized_list` should be Variable, but recevied {}.".
+                format(type(val)))
+
     if in_dygraph_mode():
-        return []
+        return array
 
     helper = LayerHelper("array", **locals())
-    return helper.create_variable(
+    tensor_array = helper.create_variable(
         name="{0}.out".format(helper.name),
         type=core.VarDesc.VarType.LOD_TENSOR_ARRAY,
         dtype=dtype)
 
+    for val in array:
+        array_write(x=val, i=array_length(tensor_array), array=tensor_array)
+
+    return tensor_array
+
 
 @templatedoc()
-def less_than(x, y, force_cpu=None, cond=None):
+def less_than(x, y, force_cpu=None, cond=None, name=None):
     """
+
     ${comment}
 
     Args:
-        x(${x_type}): ${x_comment}.
-        y(${y_type}): ${y_comment}.
+        x(Tensor): ${x_comment}.
+        y(Tensor): ${y_comment}.
         force_cpu(${force_cpu_type}): ${force_cpu_comment}.
-        cond(Variable, optional): Optional output which can be any created Variable
+        cond(Tensor, optional): Optional output which can be any created Tensor
             that meets the requirements to store the result of *less_than*.
-            if cond is None, a new Varibale will be created to store the result.
+            if cond is None, a new Tensor will be created to store the result.
+        name(str, optional): The default value is None.  Normally there is no need for
+            user to set this property.  For more information, please refer to :ref:`api_guide_Name`.
     Returns:
         ${out_comment}.
 
     Examples:
         .. code-block:: python
 
-          import paddle.fluid as fluid
-          import numpy as np
-  
-          # Graph Organizing
-          x = fluid.layers.data(name='x', shape=[2], dtype='float64')
-          y = fluid.layers.data(name='y', shape=[2], dtype='float64')
-          result = fluid.layers.less_than(x=x, y=y)
-          # The comment lists another available method.
-          # result = fluid.layers.fill_constant(shape=[2], dtype='float64', value=0)
-          # fluid.layers.less_than(x=x, y=y, cond=result)
-  
-          # Create an executor using CPU as example
-          exe = fluid.Executor(fluid.CPUPlace())
-  
-          # Execute
-          x_i = np.array([[1, 2], [3, 4]]).astype(np.float64)
-          y_i = np.array([[2, 2], [1, 3]]).astype(np.float64)
-          result_value, = exe.run(fluid.default_main_program(), feed={'x':x_i, 'y':y_i}, fetch_list=[result])
-          print(result_value) # [[True, False], [False, False]]
+            import paddle
+
+            x = paddle.to_tensor([1, 2, 3, 4], dtype='float32')
+            y = paddle.to_tensor([2, 2, 1, 3], dtype='float32')
+            result = paddle.less_than(x, y)
+            print(result) # [True, False, False, False]
+
     """
     check_variable_and_dtype(x, "x", ["float32", "float64", "int32", "int64"],
                              "less_than")
@@ -1478,8 +1648,12 @@ def less_than(x, y, force_cpu=None, cond=None):
 
 
 @templatedoc()
-def less_equal(x, y, cond=None):
+def less_equal(x, y, cond=None, name=None):
     """
+    :alias_main: paddle.less_equal
+	:alias: paddle.less_equal,paddle.tensor.less_equal,paddle.tensor.logic.less_equal
+	:old_api: paddle.fluid.layers.less_equal
+
     This OP returns the truth value of :math:`x <= y` elementwise, which is equivalent function to the overloaded operator `<=`.
 
     Args:
@@ -1487,6 +1661,8 @@ def less_equal(x, y, cond=None):
         y(Variable): Second input to compare which is N-D tensor. The input data type should be float32, float64, int32, int64.
         cond(Variable, optional): Optional output which can be any created Variable that meets the requirements to store the result of *less_equal*.
             if cond is None, a new Varibale will be created to store the result.
+        name(str, optional): The default value is None.  Normally there is no need for
+            user to set this property.  For more information, please refer to :ref:`api_guide_Name`.
 
     Returns:
         Variable, the output data type is bool: The tensor variable storing the output, the output shape is same as input :attr:`x`.
@@ -1526,8 +1702,12 @@ def less_equal(x, y, cond=None):
 
 
 @templatedoc()
-def greater_than(x, y, cond=None):
+def greater_than(x, y, cond=None, name=None):
     """
+    :alias_main: paddle.greater_than
+	:alias: paddle.greater_than,paddle.tensor.greater_than,paddle.tensor.logic.greater_than
+	:old_api: paddle.fluid.layers.greater_than
+
     This OP returns the truth value of :math:`x > y` elementwise, which is equivalent function to the overloaded operator `>`.
 
     Args:
@@ -1535,6 +1715,8 @@ def greater_than(x, y, cond=None):
         y(Variable): Second input to compare which is N-D tensor. The input data type should be float32, float64, int32, int64.
         cond(Variable, optional): Optional output which can be any created Variable that meets the requirements to store the result of *greater_than*.
             if cond is None, a new Varibale will be created to store the result.
+        name(str, optional): The default value is None.  Normally there is no need for
+            user to set this property.  For more information, please refer to :ref:`api_guide_Name`.
 
     Returns:
         Variable, the output data type is bool: The tensor variable storing the output, the output shape is same as input :attr:`x` .
@@ -1573,8 +1755,12 @@ def greater_than(x, y, cond=None):
 
 
 @templatedoc()
-def greater_equal(x, y, cond=None):
+def greater_equal(x, y, cond=None, name=None):
     """
+    :alias_main: paddle.greater_equal
+	:alias: paddle.greater_equal,paddle.tensor.greater_equal,paddle.tensor.logic.greater_equal
+	:old_api: paddle.fluid.layers.greater_equal
+
     This OP returns the truth value of :math:`x >= y` elementwise, which is equivalent function to the overloaded operator `>=`.
 
     Args:
@@ -1582,6 +1768,8 @@ def greater_equal(x, y, cond=None):
         y(Variable): Second input to compare which is N-D tensor. The input data type should be float32, float64, int32, int64.
         cond(Variable, optional): Optional output which can be any created Variable that meets the requirements to store the result of *greater_equal*.
             if cond is None, a new Varibale will be created to store the result.
+        name(str, optional): The default value is None.  Normally there is no need for
+            user to set this property.  For more information, please refer to :ref:`api_guide_Name`.
 
     Returns:
         Variable, the output data type is bool: The tensor variable storing the output, the output shape is same as input :attr:`x`.
@@ -1621,7 +1809,7 @@ def greater_equal(x, y, cond=None):
     return cond
 
 
-def equal(x, y, cond=None):
+def equal(x, y, cond=None, name=None):
     """
     This layer returns the truth value of :math:`x == y` elementwise.
 
@@ -1631,6 +1819,8 @@ def equal(x, y, cond=None):
         cond(Variable, optional): Optional output which can be any created 
             Variable that meets the requirements to store the result of *equal*.
             if cond is None, a new Varibale will be created to store the result.
+        name(str, optional): The default value is None.  Normally there is no need for
+            user to set this property.  For more information, please refer to :ref:`api_guide_Name`.
 
     Returns:
         Variable: output Tensor, it's shape is the same as the input's Tensor,
@@ -1666,8 +1856,12 @@ def equal(x, y, cond=None):
     return cond
 
 
-def not_equal(x, y, cond=None):
+def not_equal(x, y, cond=None, name=None):
     """
+    :alias_main: paddle.not_equal
+	:alias: paddle.not_equal,paddle.tensor.not_equal,paddle.tensor.logic.not_equal
+	:old_api: paddle.fluid.layers.not_equal
+
     This OP returns the truth value of :math:`x != y` elementwise, which is equivalent function to the overloaded operator `!=`.
 
     Args:
@@ -1675,6 +1869,8 @@ def not_equal(x, y, cond=None):
         y(Variable): Second input to compare which is N-D tensor. The input data type should be float32, float64, int32, int64.
         cond(Variable, optional): Optional output which can be any created Variable that meets the requirements to store the result of *not_equal*.
             if cond is None, a new Varibale will be created to store the result.
+        name(str, optional): The default value is None.  Normally there is no need for
+            user to set this property.  For more information, please refer to :ref:`api_guide_Name`.
 
     Returns:
         Variable, the output data type is bool: The tensor variable storing the output, the output shape is same as input :attr:`x`.
@@ -1777,7 +1973,7 @@ def array_read(array, i):
         assert i.shape == [
             1
         ], "The shape of index 'i' should be [1] in dygraph mode"
-        i = i.numpy()[0]
+        i = i.numpy().item(0)
         return array[i]
 
     check_variable_and_dtype(i, 'i', ['int64'], 'array_read')
@@ -1821,6 +2017,9 @@ def shrink_memory(x, i, table):
         usage.
     """
     helper = LayerHelper('shrink_memory', **locals())
+    check_type(x, 'x', Variable, 'shrink_memory')
+    check_type(i, 'i', Variable, 'shrink_memory')
+    check_type(table, 'table', Variable, 'shrink_memory')
     out = helper.create_variable_for_type_inference(dtype=x.dtype)
     helper.append_op(
         type='shrink_rnn_memory',
@@ -1963,18 +2162,8 @@ class ConditionalBlock(object):
 
         intermediate = set()
         params = set()
-
-        for each_op in inside_block.ops:
-            assert isinstance(each_op, Operator)
-            for iname in each_op.input_names:
-                for in_var_name in each_op.input(iname):
-                    if in_var_name not in intermediate:
-                        params.add(in_var_name)
-
-            for oname in each_op.output_names:
-                for out_var_name in each_op.output(oname):
-                    intermediate.add(out_var_name)
-        input_set = set([ipt.name for ipt in self.inputs])
+        params, intermediate = get_inputs_outputs_in_block(
+            inside_block, params, intermediate, helper=self.helper)
 
         # Todo(liym27) Here assume that all params are in recursive parent block
         # but when minimize() called in control flow, some params may be in
@@ -2010,8 +2199,11 @@ class ConditionalBlock(object):
 
     def need_append_conditional_block_grad(self, inside_block):
         grad_sub_block_idx = inside_block.backward_block_idx
+        inside_block_idx = inside_block.idx
 
-        return grad_sub_block_idx != -1
+        # if inside_block have grad_block and grad_block is not itself,
+        # we will append conditional block grad.
+        return grad_sub_block_idx != -1 and grad_sub_block_idx != inside_block_idx
 
     def append_conditional_block_grad(self, parent_block, inside_block,
                                       conditional_block_op):
@@ -2097,9 +2289,13 @@ def copy_var_to_parent_block(var, layer_helper):
     assert parent_idx >= 0, "Got wrong parent block index when assigning var to parent scope in control_flow"
     parent_block = prog.block(parent_idx)
 
-    parent_block_var = parent_block.create_var(
-        dtype=var.dtype, shape=var.shape, type=var.type)
-    assign(var, parent_block_var)
+    if var.type == core.VarDesc.VarType.LOD_TENSOR_ARRAY \
+            and parent_block._find_var_recursive(var.name):
+        parent_block_var = var
+    else:
+        parent_block_var = parent_block.create_var(
+            dtype=var.dtype, shape=var.shape, type=var.type)
+        assign(var, parent_block_var)
     return parent_block_var
 
 
@@ -2120,23 +2316,29 @@ def cond(pred, true_fn=None, false_fn=None, name=None):
         the same shape because of dataflow model of PaddlePaddle while the
         tensors in the tuples or the lists can have different shapes.
 
-        2. Any tensors or operations created outside of ``true_fn`` and
-        ``false_fn`` will be executed regardless of which branch is selected at
-        runtime. This has frequently surprised users who expected a lazy
-        semantics. For example:
+        2. This API could be used under both static mode or dygraph mode. If it
+        is in dygraph mode, the API only runs one branch based on condition.
+
+        3. If it is in static mode, any tensors or operations created outside 
+        or inside of ``true_fn`` and ``false_fn`` will be in net building
+        regardless of which branch is selected at runtime. This has frequently
+        surprised users who expected a lazy semantics. For example:
 
         .. code-block:: python
-        
-            import paddle.fluid as fluid
-            a = fluid.data(name='a', shape=[-1, 1], dtype='float32')
-            b = fluid.data(name='b', shape=[-1, 1], dtype='float32')
-            c = a * b
-            out = fluid.layers.cond(a < b, lambda: a + c, lambda: b * b)
 
-        No matter whether ``a < b`` , ``c = a * b`` will run.
+            import paddle
+
+            a = paddle.zeros((1, 1))
+            b = paddle.zeros((1, 1))
+            c = a * b
+            out = paddle.static.nn.cond(a < b, lambda: a + c, lambda: b * b)
+
+        No matter whether ``a < b`` , ``c = a * b`` will be in net building and
+        run. ``a + c`` and ``b * b`` will be in net building, but only one
+        branch will be executed during runtime.
 
     Args:
-        pred(Variable): A boolean tensor whose numel should be 1. The boolean
+        pred(Tensor): A boolean tensor whose numel should be 1. The boolean
             value determines whether to return the result of ``true_fn`` or
             ``false_fn`` .
         true_fn(callable, optional): A callable to be performed if ``pred`` is
@@ -2148,7 +2350,7 @@ def cond(pred, true_fn=None, false_fn=None, name=None):
              refer to :ref:`api_guide_Name` .
 
     Returns:
-        Variable|list(Variable)|tuple(Variable): returns ``true_fn()`` if the
+        Tensor|list(Tensor)|tuple(Tensor): returns ``true_fn()`` if the
         predicate ``pred`` is true else ``false_fn()`` .
 
     Raises:
@@ -2159,10 +2361,7 @@ def cond(pred, true_fn=None, false_fn=None, name=None):
     Examples:
         .. code-block:: python
 
-            import paddle.fluid as fluid
-            import paddle.fluid.layers as layers
-            from paddle.fluid.executor import Executor
-            from paddle.fluid.framework import Program, program_guard
+            import paddle
 
             #
             # pseudocode:
@@ -2173,31 +2372,27 @@ def cond(pred, true_fn=None, false_fn=None, name=None):
             #
 
             def true_func():
-                return layers.fill_constant(
-                    shape=[1, 2], dtype='int32', value=1), layers.fill_constant(
-                        shape=[2, 3], dtype='bool', value=True)
+                return paddle.full(shape=[1, 2], dtype='int32',
+                                   fill_value=1), paddle.full(shape=[2, 3],
+                                                              dtype='bool',
+                                                              fill_value=True)
+
 
             def false_func():
-                return layers.fill_constant(
-                    shape=[3, 4], dtype='float32', value=3), layers.fill_constant(
-                        shape=[4, 5], dtype='int64', value=2)
+                return paddle.full(shape=[3, 4], dtype='float32',
+                                   fill_value=3), paddle.full(shape=[4, 5],
+                                                              dtype='int64',
+                                                              fill_value=2)
 
-            main_program = Program()
-            startup_program = Program()
-            with program_guard(main_program, startup_program):
-                x = layers.fill_constant(shape=[1], dtype='float32', value=0.1)
-                y = layers.fill_constant(shape=[1], dtype='float32', value=0.23)
-                pred = layers.less_than(x, y)            
-                out = layers.cond(pred, true_func, false_func)
-                # out is a tuple containing 2 tensors
 
-            place = fluid.CUDAPlace(0) if fluid.core.is_compiled_with_cuda(
-            ) else fluid.CPUPlace()
-            exe = fluid.Executor(place)
-            ret = exe.run(main_program, fetch_list=out)
+            x = paddle.full(shape=[1], dtype='float32', fill_value=0.1)
+            y = paddle.full(shape=[1], dtype='float32', fill_value=0.23)
+            pred = paddle.less_than(x=x, y=y, name=None)
+            ret = paddle.static.nn.cond(pred, true_func, false_func)
+            # ret is a tuple containing 2 tensors
             # ret[0] = [[1 1]]
             # ret[1] = [[ True  True  True]
-            #           [ True  True  True]]
+            #           [ True  True  True]]            
 
     """
     if in_dygraph_mode():
@@ -2290,6 +2485,8 @@ def _error_message(what, arg_name, op_name, right_value, error_value):
 
 def case(pred_fn_pairs, default=None, name=None):
     '''
+    :api_attr: Static Graph
+
     This operator works like an if-elif-elif-else chain.
 
     Args:
@@ -2298,7 +2495,7 @@ def case(pred_fn_pairs, default=None, name=None):
         name(str, optional): The default value is None. Normally there is no need for user to set this property. For more information, please refer to :ref:`api_guide_Name`.
 
     Returns:
-        Variable|list(Variable): Tensors returned by the callable from the first pair whose pred is True,
+        Tensor|list(Tensor): Tensors returned by the callable from the first pair whose pred is True,
         or Tensors returned by ``default`` if no pred in ``pred_fn_pairs`` is True and ``default`` is not None,
         or Tensors returned by the last callable in ``pred_fn_pairs``  if no pred in ``pred_fn_pairs`` is True and ``default`` is None.
 
@@ -2306,45 +2503,47 @@ def case(pred_fn_pairs, default=None, name=None):
         TypeError: If the type of ``pred_fn_pairs`` is not list or tuple.
         TypeError: If the type of elements in ``pred_fn_pairs`` is not tuple.
         TypeError: If the size of tuples in ``pred_fn_pairs`` is not 2.
-        TypeError: If the first element of 2-tuple in ``pred_fn_pairs`` is not Variable.
+        TypeError: If the first element of 2-tuple in ``pred_fn_pairs`` is not a Tensor.
         TypeError: If the second element of 2-tuple in ``pred_fn_pairs`` is not callable.
         TypeError: If ``default`` is not None but it is not callable.
 
     Examples:
         .. code-block:: python
 
-            import paddle.fluid as fluid
-            import paddle.fluid.layers as layers
+            import paddle
+
+            paddle.enable_static()
 
             def fn_1():
-                return layers.fill_constant(shape=[1, 2], dtype='float32', value=1)
+                return paddle.full(shape=[1, 2], dtype='float32', fill_value=1)
 
             def fn_2():
-                return layers.fill_constant(shape=[2, 2], dtype='int32', value=2)
+                return paddle.full(shape=[2, 2], dtype='int32', fill_value=2)
 
             def fn_3():
-                return layers.fill_constant(shape=[3], dtype='int32', value=3)
+                return paddle.full(shape=[3], dtype='int32', fill_value=3)
 
-            main_program = fluid.default_startup_program()
-            startup_program = fluid.default_main_program()
-            with fluid.program_guard(main_program, startup_program):
-                x = layers.fill_constant(shape=[1], dtype='float32', value=0.3)
-                y = layers.fill_constant(shape=[1], dtype='float32', value=0.1)
-                z = layers.fill_constant(shape=[1], dtype='float32', value=0.2)
+            main_program = paddle.static.default_startup_program()
+            startup_program = paddle.static.default_main_program()
 
-                pred_1 = layers.less_than(z, x)  # true: 0.2 < 0.3
-                pred_2 = layers.less_than(x, y)  # false: 0.3 < 0.1
-                pred_3 = layers.equal(x, y)      # false: 0.3 == 0.1
+            with paddle.static.program_guard(main_program, startup_program):
+                x = paddle.full(shape=[1], dtype='float32', fill_value=0.3)
+                y = paddle.full(shape=[1], dtype='float32', fill_value=0.1)
+                z = paddle.full(shape=[1], dtype='float32', fill_value=0.2)
+
+                pred_1 = paddle.less_than(z, x)  # true: 0.2 < 0.3
+                pred_2 = paddle.less_than(x, y)  # false: 0.3 < 0.1
+                pred_3 = paddle.equal(x, y)      # false: 0.3 == 0.1
 
                 # Call fn_1 because pred_1 is True
-                out_1 = layers.case(
+                out_1 = paddle.static.nn.case(
                     pred_fn_pairs=[(pred_1, fn_1), (pred_2, fn_2)], default=fn_3)
 
                 # Argument default is None and no pred in pred_fn_pairs is True. fn_3 will be called.
                 # because fn_3 is the last callable in pred_fn_pairs.
-                out_2 = layers.case(pred_fn_pairs=[(pred_2, fn_2), (pred_3, fn_3)])
+                out_2 = paddle.static.nn.case(pred_fn_pairs=[(pred_2, fn_2), (pred_3, fn_3)])
 
-                exe = fluid.Executor(fluid.CPUPlace())
+                exe = paddle.static.Executor(paddle.CPUPlace())
                 res_1, res_2 = exe.run(main_program, fetch_list=[out_1, out_2])
                 print(res_1)  # [[1. 1.]]
                 print(res_2)  # [3 3 3]
@@ -2400,6 +2599,7 @@ def case(pred_fn_pairs, default=None, name=None):
 
 class Switch(object):
     """
+    :api_attr: Static Graph
 
     This class is used to implement Switch branch control function. 
     Switch branch contains several case branches and one default branch. 
@@ -2557,6 +2757,8 @@ class IfElseBlockGuard(object):
 
 class IfElse(object):
     """
+    :api_attr: Static Graph
+
     This class is used to implement IfElse branch control function. IfElse contains two blocks, true_block and false_block. IfElse will put data satisfying True or False conditions into different blocks to run.
 
     Cond is a 2-D Tensor with shape [N, 1] and data type bool, representing the execution conditions of the corresponding part of the input data.
@@ -2733,6 +2935,8 @@ class IfElse(object):
 
 class DynamicRNN(object):
     """
+    :api_attr: Static Graph
+
     **Note: the input of this class should be LoDTensor which holds the
     information of variable-length sequences. If the input is fixed-length Tensor,
     please use StaticRNN (fluid.layers.** :ref:`api_fluid_layers_StaticRNN` **) for
@@ -2817,7 +3021,7 @@ class DynamicRNN(object):
         self.mem_link = []
 
     def step_input(self, x, level=0):
-        """
+        r"""
         This function is used to set sequence x as DynamicRNN's input.
         The maximum sequence length in x determines the number of time steps
         the RNN unit will be executed. DynamicRNN can take multiple inputs.
@@ -2908,9 +3112,7 @@ class DynamicRNN(object):
                 rnn_output = drnn()
         """
         self._assert_in_rnn_block_("step_input")
-        if not isinstance(x, Variable):
-            raise TypeError(
-                "step_input() can only take a Variable as its input.")
+        check_type(x, 'x', Variable, 'fluid.layers.DynamicRNN.step_input()')
         parent_block = self._parent_block_()
         if self.lod_rank_table is None:
             self.lod_rank_table = parent_block.create_var(
@@ -2951,7 +3153,7 @@ class DynamicRNN(object):
         return array_read(array=input_array, i=self.step_idx)
 
     def static_input(self, x):
-        """
+        r"""
         This function is used to set x as DynamicRNN's static input. It is optional.
 
         - Case 1, set static input with LoD
@@ -3077,9 +3279,7 @@ class DynamicRNN(object):
                 rnn_output = drnn()
         """
         self._assert_in_rnn_block_("static_input")
-        if not isinstance(x, Variable):
-            raise TypeError(
-                "static_input() can only take a Variable as its input")
+        check_type(x, 'x', Variable, 'fluid.layers.DynamicRNN.static_input()')
         if self.lod_rank_table is None:
             raise RuntimeError(
                 "static_input() must be called after step_input().")
@@ -3157,7 +3357,7 @@ class DynamicRNN(object):
                value=0.0,
                need_reorder=False,
                dtype='float32'):
-        """
+        r"""
         Create a memory Variable for DynamicRNN to deliver data cross time steps.
         It can be initialized by an existing Tensor or a constant Tensor of given
         dtype and shape.
@@ -3244,10 +3444,12 @@ class DynamicRNN(object):
         """
         self._assert_in_rnn_block_('memory')
         self._init_zero_idx_()
+        if shape is not None:
+            check_type(shape, 'shape', (list, tuple),
+                       'fluid.layers.DynamicRNN.memory()')
         if init is not None:
-            if not isinstance(init, Variable):
-                raise TypeError(
-                    "The input arg `init` of memory() must be a Variable")
+            check_type(init, 'init', Variable,
+                       'fluid.layers.DynamicRNN.memory()')
             parent_block = self._parent_block_()
             init_tensor = init
             if need_reorder == True:
@@ -3328,12 +3530,10 @@ class DynamicRNN(object):
             ValueError: When :code:`update_memory()` is called before :code:`step_input()` .
         """
         self._assert_in_rnn_block_('update_memory')
-        if not isinstance(ex_mem, Variable):
-            raise TypeError("The input arg `ex_mem` of update_memory() must "
-                            "be a Variable")
-        if not isinstance(new_mem, Variable):
-            raise TypeError("The input arg `new_mem` of update_memory() must "
-                            "be a Variable")
+        check_type(ex_mem, 'ex_mem', Variable,
+                   'fluid.layers.DynamicRNN.update_memory()')
+        check_type(new_mem, 'new_mem', Variable,
+                   'fluid.layers.DynamicRNN.update_memory()')
 
         mem_array = self.mem_dict.get(ex_mem.name, None)
         if mem_array is None:
@@ -3360,6 +3560,8 @@ class DynamicRNN(object):
         self._assert_in_rnn_block_('output')
         parent_block = self._parent_block_()
         for each in outputs:
+            check_type(each, "outputs", Variable,
+                       "fluid.layers.DynamicRNN.output")
             outside_array = parent_block.create_var(
                 name=unique_name.generate_with_ignorable_key("_".join(
                     [self.helper.name, "output_array", each.name])),
@@ -3400,21 +3602,23 @@ class DynamicRNN(object):
 
 def switch_case(branch_index, branch_fns, default=None, name=None):
     '''
+    :api_attr: Static Graph
+
     This operator is like a C++ switch/case statement.
 
     Args:
-        branch_index(Variable): A Tensor with shape [1] to specify which branch to execute. The data type is ``int32``, ``int64`` or ``uint8``.
+        branch_index(Tensor): A Tensor with shape [1] to specify which branch to execute. The data type is ``int32``, ``int64`` or ``uint8``.
         branch_fns(dict|list|tuple): If it's a list or tuple, the elements in it could be pairs of (int, callable) or simple callables whose actual index will be used as the index of callable. If it's a dict, its key is a python integer and the value is a callable. All callables return the same structure of Tensors.
         default(callable, optional): Callable that returns a structure of Tensors.
         name(str, optional): The default value is None. Normally there is no need for user to set this property. For more information, please refer to :ref:`api_guide_Name`.
 
     Returns:
-        Variable|list(Variable): Tensors returned by the callable specified by ``branch_index`` in ``branch_fns``,
+        Tensor|list(Tensor): Tensors returned by the callable specified by ``branch_index`` in ``branch_fns``,
         or Tensors returned by ``default`` if ``default`` is not None and no index matches in ``branch_fns``,
         or Tensors returned by the callable with the max index in ``branch_fns`` if ``default`` is None and no index matches in ``branch_fns``.
 
     Raises:
-        TypeError: If the type of ``branch_index`` is not Variable.
+        TypeError: If the type of ``branch_index`` is not Tensor.
         TypeError: If the data type of ``branch_index`` is not ``int32``, ``int64`` or ``uint8``.
         TypeError: If the type of ``branch_fns`` is not dict, list or tuple.
         TypeError: If the elements of ``branch_fns`` is not 2-tuple.
@@ -3426,40 +3630,41 @@ def switch_case(branch_index, branch_fns, default=None, name=None):
     Examples:
         .. code-block:: python
 
-            import paddle.fluid as fluid
-            import paddle.fluid.layers as layers
+            import paddle
+
+            paddle.enable_static()
 
             def fn_1():
-                return layers.fill_constant(shape=[1, 2], dtype='float32', value=1)
+                return paddle.full(shape=[1, 2], dtype='float32', fill_value=1)
 
             def fn_2():
-                return layers.fill_constant(shape=[2, 2], dtype='int32', value=2)
+                return paddle.full(shape=[2, 2], dtype='int32', fill_value=2)
 
             def fn_3():
-                return layers.fill_constant(shape=[3], dtype='int32', value=3)
+                return paddle.full(shape=[3], dtype='int32', fill_value=3)
 
-            main_program = fluid.default_startup_program()
-            startup_program = fluid.default_main_program()
-            with fluid.program_guard(main_program, startup_program):
-                index_1 = layers.fill_constant(shape=[1], dtype='int32', value=1)
-                index_2 = layers.fill_constant(shape=[1], dtype='int32', value=2)
+            main_program = paddle.static.default_startup_program()
+            startup_program = paddle.static.default_main_program()
+            with paddle.static.program_guard(main_program, startup_program):
+                index_1 = paddle.full(shape=[1], dtype='int32', fill_value=1)
+                index_2 = paddle.full(shape=[1], dtype='int32', fill_value=2)
 
-                out_1 = layers.switch_case(
+                out_1 = paddle.static.nn.switch_case(
                     branch_index=index_1,
                     branch_fns={1: fn_1, 2: fn_2},
                     default=fn_3)
 
-                out_2 = layers.switch_case(
+                out_2 = paddle.static.nn.switch_case(
                     branch_index=index_2,
                     branch_fns=[(1, fn_1), (2, fn_2)],
                     default=fn_3)
 
                 # Argument default is None and no index matches. fn_3 will be called because of the max index 7.
-                out_3 = layers.switch_case(
+                out_3 = paddle.static.nn.switch_case(
                     branch_index=index_2,
                     branch_fns=[(0, fn_1), (4, fn_2), (7, fn_3)])
 
-                exe = fluid.Executor(fluid.CPUPlace())
+                exe = paddle.static.Executor(paddle.CPUPlace())
                 res_1, res_2, res_3 = exe.run(main_program, fetch_list=[out_1, out_2, out_3])
                 print(res_1)  # [[1. 1.]]
                 print(res_2)  # [[2 2] [2 2]]
@@ -3581,41 +3786,46 @@ def reorder_lod_tensor_by_rank(x, rank_table):
     return out
 
 
-def is_empty(x, cond=None):
+def is_empty(x, name=None):
     """
-    Test whether a Variable is empty.
+
+    Test whether a Tensor is empty.
 
     Args:
-        x (Variable): The Variable to be tested.
-        cond (Variable, optional): Output parameter. Default: None. If this parameter is given, it
-                              saves the test result of given 'x'.
+        x (Tensor): The Tensor to be tested.
+        name (str, optional): The default value is ``None`` . Normally users
+                            don't have to set this parameter. For more information,
+                            please refer to :ref:`api_guide_Name` .
 
     Returns:
-        Variable: A bool scalar. True if 'x' is an empty Variable.
-
-    Raises:
-        TypeError: If input cond is not a variable, or cond's dtype is
-                   not bool.
+        Tensor: A bool scalar Tensor. True if 'x' is an empty Tensor.
 
     Examples:
         .. code-block:: python
 
-          import paddle.fluid as fluid
-          input = fluid.layers.data(name="input", shape=[4, 32, 32], dtype="float32")
-          res = fluid.layers.is_empty(x=input)
-          # or:
-          # fluid.layers.is_empty(x=input, cond=res)
+            import paddle
+
+            input = paddle.rand(shape=[4, 32, 32], dtype='float32')
+            res = paddle.is_empty(x=input)
+            print("res:", res)
+            # ('res:', Tensor: eager_tmp_1
+            #    - place: CPUPlace
+            #    - shape: [1]
+            #    - layout: NCHW
+            #    - dtype: bool
+            #    - data: [0])
 
     """
+    if in_dygraph_mode():
+        return _C_ops.is_empty(x)
+
     check_variable_and_dtype(x, 'x', ['float32', 'float64', 'int32', 'int64'],
                              'is_empty')
-    check_type(cond, 'cond', (Variable, type(None)), 'is_empty')
+    check_type(name, "name", (str, type(None)), "is_empty")
+
     helper = LayerHelper("is_empty", **locals())
-    if cond is None:
-        cond = helper.create_variable_for_type_inference(dtype='bool')
-        cond.stop_gradient = True
-    else:
-        check_dtype(cond.dtype, 'cond', ['bool'], 'is_empty')
+    cond = helper.create_variable_for_type_inference(dtype='bool')
+    cond.stop_gradient = True
     helper.append_op(
         type='is_empty', inputs={'X': [x]}, outputs={'Out': [cond]})
     return cond

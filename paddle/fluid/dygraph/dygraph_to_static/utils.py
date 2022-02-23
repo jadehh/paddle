@@ -18,12 +18,49 @@ import ast
 import astor
 import atexit
 import copy
-import gast
-import imp
+import collections
+from paddle.utils import gast
 import inspect
 import os
 import six
 import tempfile
+import textwrap
+import numpy as np
+
+import paddle
+from paddle.fluid import unique_name
+from paddle.fluid.data_feeder import convert_dtype
+
+# Note(Aurelius): Do not forget the dot `.` to distinguish other
+# module such as paddlenlp.
+PADDLE_MODULE_PREFIX = 'paddle.'
+DYGRAPH_MODULE_PREFIX = 'paddle.fluid.dygraph'
+DYGRAPH_TO_STATIC_MODULE_PREFIX = 'paddle.fluid.dygraph.dygraph_to_static'
+
+
+class BaseNodeVisitor(gast.NodeVisitor):
+    """
+    Implement customized NodeVisitor inherited from gast.NodeVisitor. 
+    Ancestor nodes are traced to easily support more operations of currently
+    visited node.
+    """
+
+    def __init__(self):
+        self.ancestor_nodes = []
+
+    def visit(self, node):
+        """Visit a node."""
+        self.ancestor_nodes.append(node)
+
+        method = 'visit_' + node.__class__.__name__
+        visitor = getattr(self, method, self.generic_visit)
+        ret = visitor(node)
+        self.ancestor_nodes.pop()
+        return ret
+
+
+# imp is deprecated in python3
+from importlib.machinery import SourceFileLoader
 
 dygraph_class_to_static_api = {
     "CosineDecay": "cosine_decay",
@@ -35,6 +72,93 @@ dygraph_class_to_static_api = {
     "PolynomialDecay": "polynomial_decay",
 }
 
+FOR_ITER_INDEX_PREFIX = '__for_loop_var_index'
+FOR_ITER_TUPLE_PREFIX = '__for_loop_iter_tuple'
+FOR_ITER_TUPLE_INDEX_PREFIX = '__for_loop_iter_tuple_index'
+FOR_ITER_VAR_LEN_PREFIX = '__for_loop_var_len'
+FOR_ITER_VAR_NAME_PREFIX = '__for_loop_iter_var'
+FOR_ITER_ZIP_TO_LIST_PREFIX = '__for_loop_iter_zip'
+
+# FullArgSpec is valid from Python3. Defined a Namedtuple to
+# to make it available in Python2.
+FullArgSpec = collections.namedtuple('FullArgSpec', [
+    'args', 'varargs', 'varkw', 'defaults', 'kwonlyargs', 'kwonlydefaults',
+    'annotations'
+])
+
+
+def getfullargspec(target):
+    if hasattr(inspect, "getfullargspec"):
+        return inspect.getfullargspec(target)
+    else:
+        argspec = inspect.getargspec(target)
+        return FullArgSpec(
+            args=argspec.args,
+            varargs=argspec.varargs,
+            varkw=argspec.keywords,
+            defaults=argspec.defaults,
+            kwonlyargs=[],
+            kwonlydefaults=None,
+            annotations={})
+
+
+def parse_arg_and_kwargs(function):
+    """
+    Returns full argument names as list. e.g ['x', 'y', 'z']
+    """
+    fullargspec = getfullargspec(function)
+    arg_names = fullargspec.args
+    if arg_names and 'self' == arg_names[0]:
+        arg_names = fullargspec.args[1:]
+
+    # parse default kwargs
+    default_kwargs = {}
+    default_values = fullargspec.defaults
+    if default_values:
+        assert len(default_values) <= len(arg_names)
+        default_kwarg_names = arg_names[-len(default_values):]
+        default_kwargs = dict(zip(default_kwarg_names, default_values))
+
+    return arg_names, default_kwargs
+
+
+def parse_varargs_name(function):
+    """
+    Returns varargs name string of function. e.g: 'input' from `foo(x, *input)`
+    """
+    fullargspec = getfullargspec(function)
+    varargs = fullargspec.varargs
+    return varargs
+
+
+def type_name(v):
+    return type(v).__name__
+
+
+def make_hashable(x, error_msg=None):
+    """
+    Makes input `x` hashable.
+
+    For some unhashable objects, such as `dict/list/set/np.ndarray`,applying hash function by using their values.
+    """
+    if isinstance(x, (tuple, list, set)):
+        return tuple(map(make_hashable, x))
+
+    try:
+        hash(x)
+    except TypeError:
+        if isinstance(x, np.ndarray):
+            # Note: `tostring()` will return the binary data from np.ndarray that
+            # means different value will lead to different hash code.
+            return hash(x.tostring())
+        elif isinstance(x, dict):
+            return tuple(map(make_hashable, x.values()))
+
+        error_msg = error_msg or "Requires a hashable object."
+        raise ValueError(error_msg + " But received type: %s" % type_name(x))
+
+    return x
+
 
 def _is_api_in_module_helper(obj, module_prefix):
     m = inspect.getmodule(obj)
@@ -43,7 +167,14 @@ def _is_api_in_module_helper(obj, module_prefix):
 
 def is_api_in_module(node, module_prefix):
     assert isinstance(node, gast.Call), "Input non-Call node for is_dygraph_api"
-    func_str = astor.to_source(gast.gast_to_ast(node.func))
+
+    # Python can have gast.Call as function, for example: covert_call(func)(x)
+    # We only check the most outside function
+    func_node = node.func
+    while isinstance(func_node, gast.Call):
+        func_node = func_node.func
+
+    func_str = astor.to_source(gast.gast_to_ast(func_node)).strip()
     try:
         # TODO(liym27):
         #  Consider a better to import modules like:
@@ -52,9 +183,12 @@ def is_api_in_module(node, module_prefix):
         #  import_str = "".join(import_statements)
         import paddle
         import paddle.fluid as fluid
-        import paddle.fluid.layers as layers
-        from paddle.fluid.dygraph import to_variable
         import paddle.fluid.dygraph as dygraph
+        import paddle.fluid.layers as layers
+
+        from paddle.fluid.dygraph import to_variable
+        from paddle import to_tensor
+
         return eval("_is_api_in_module_helper({}, '{}')".format(func_str,
                                                                 module_prefix))
     except NameError:
@@ -62,15 +196,23 @@ def is_api_in_module(node, module_prefix):
 
 
 def is_dygraph_api(node):
+
     # Note: A api in module dygraph_to_static is not a real dygraph api.
-    if is_api_in_module(node, "paddle.fluid.dygraph.dygraph_to_static"):
+    if is_api_in_module(node, DYGRAPH_TO_STATIC_MODULE_PREFIX):
         return False
 
-    return is_api_in_module(node, "paddle.fluid.dygraph")
+    # TODO(liym27): A better way to determine whether it is a dygraph api.
+    #  Consider the decorator @dygraph_only
+    return is_api_in_module(node, DYGRAPH_MODULE_PREFIX)
 
 
 def is_paddle_api(node):
-    return is_api_in_module(node, "paddle.fluid")
+    return is_api_in_module(node, PADDLE_MODULE_PREFIX)
+
+
+def is_paddle_func(func):
+    m = inspect.getmodule(func)
+    return m is not None and m.__name__.startswith(PADDLE_MODULE_PREFIX)
 
 
 # Is numpy_api cannot reuse is_api_in_module because of numpy module problem
@@ -149,14 +291,6 @@ def _add_keywords_to(node, dygraph_api_name):
     return
 
 
-def is_to_variable(node):
-    assert isinstance(node, gast.Call)
-    if is_dygraph_api(node):
-        api_name = ast_to_source_code(node.func).strip()
-        return api_name.endswith("to_variable")
-    return False
-
-
 def to_static_ast(node, class_node):
     assert isinstance(node, gast.Call)
     assert isinstance(class_node, gast.Call)
@@ -181,29 +315,6 @@ def to_static_ast(node, class_node):
 
     gast.fix_missing_locations(node)
 
-    return node
-
-
-def to_assign_node(node):
-    # Transform dygraph api `fluid.dygraph.to_variable` to static api `fluid.layers.assign`.
-    # NOTE:
-    #   1. Api `to_variable` supports data type {float16, float32, float64, int16, int32, int64, uint8, uint16},
-    #   but api `assign` only supports {float32, float64, int32, int64, bool};
-    #   2. If the input of api `assign` is numpy.ndarray, its size cannot be greater than 1024 * 1024.
-    assert isinstance(node, gast.Call)
-    assign_api = gast.parse('fluid.layers.assign').body[0].value
-    node.func = assign_api
-
-    if node.args:
-        node.args = [node.args[0]]
-        node.keywords = []
-    else:
-        for idx, kw in enumerate(node.keywords):
-            if kw.arg == 'value':
-                node.keywords[idx].arg = 'input'
-                node.keywords = [node.keywords[idx]]
-                node.args = []
-                break
     return node
 
 
@@ -234,7 +345,15 @@ def update_args_of_func(node, dygraph_node, method_name):
 
 
 def create_api_shape_node(tensor_shape_node):
-    assert isinstance(tensor_shape_node, (gast.Attribute, gast.Subscript))
+    assert isinstance(tensor_shape_node,
+                      (gast.Name, gast.Attribute, gast.Subscript))
+
+    if isinstance(tensor_shape_node, gast.Name):
+        api_shape_node = gast.Call(
+            func=gast.parse('fluid.layers.shape').body[0].value,
+            args=[tensor_shape_node],
+            keywords=[])
+        return api_shape_node
 
     if isinstance(tensor_shape_node, gast.Attribute):
         api_shape_node = gast.Call(
@@ -261,9 +380,15 @@ def get_attribute_full_name(node):
     return astor.to_source(gast.gast_to_ast(node)).strip()
 
 
-def generate_name_node(name_ids, ctx=gast.Load()):
+def generate_name_node(name_ids, ctx=gast.Load(), gen_tuple_if_single=False):
     """
-    Generate list or gast.Tuple of ast.Name for Return statement.
+    If name_ids is list or tuple or set with multiple strings, this function
+    generates gast.Tuple of gast.Name.
+    If the name_ids is single string or contains only 1 string, this function
+    returns gast.Name if gen_tuple_if_single==False else returns gast.Tuple
+    with only one gast.Name
+
+    This function is used at several gast.Return statements.
     """
     if isinstance(name_ids, six.string_types):
         name_ids = [name_ids]
@@ -275,7 +400,7 @@ def generate_name_node(name_ids, ctx=gast.Load()):
             id=name_id, ctx=ctx, annotation=None, type_comment=None)
         for name_id in name_ids
     ]
-    if len(gast_names) == 1:
+    if len(gast_names) == 1 and not gen_tuple_if_single:
         name_node = gast_names[0]
     else:
         name_node = gast.Tuple(elts=gast_names, ctx=ctx)
@@ -354,26 +479,37 @@ def ast_to_func(ast_root, dyfunc, delete_on_exit=True):
     TODO: If only decorate one of inner function instead of decorating the main
     function, the other inner functions are invisible for the decorated function.
     """
+
+    def remove_if_exit(filepath):
+        if os.path.exists(filepath):
+            os.remove(filepath)
+
     source = ast_to_source_code(ast_root)
-    if six.PY2:
-        source = source.encode('utf-8')
-        f = tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False)
-    else:
-        f = tempfile.NamedTemporaryFile(
-            mode='w', suffix='.py', delete=False, encoding='utf-8')
+    source = _inject_import_statements() + source
+
+    f = tempfile.NamedTemporaryFile(
+        mode='w', suffix='.py', delete=False, encoding='utf-8')
     with f:
         module_name = os.path.basename(f.name[:-3])
         f.write(source)
 
     if delete_on_exit:
-        atexit.register(lambda: os.remove(f.name))
-    module = imp.load_source(module_name, f.name)
+        atexit.register(lambda: remove_if_exit(f.name))
+        atexit.register(lambda: remove_if_exit(f.name[:-3] + ".pyc"))
+
+    module = SourceFileLoader(module_name, f.name).load_module()
     func_name = dyfunc.__name__
-    if not hasattr(module, func_name):
+    # The 'forward' or 'another_forward' of 'TranslatedLayer' cannot be obtained
+    # through 'func_name'. So set the special function name '__i_m_p_l__'.
+    if hasattr(module, '__i_m_p_l__'):
+        callable_func = getattr(module, '__i_m_p_l__')
+        callable_func.__name__ = func_name
+    elif hasattr(module, func_name):
+        callable_func = getattr(module, func_name)
+    else:
         raise ValueError(
             'Function: %s doesn\'t exist in the Module transformed from AST.' %
             func_name)
-    callable_func = getattr(module, func_name)
     # After transform dygraph function into callable_func saved in tmp file,
     # it lost the global variables from imported statements or defined in source file.
     # Recovers the necessary variables by `__globals__`.
@@ -382,21 +518,44 @@ def ast_to_func(ast_root, dyfunc, delete_on_exit=True):
     return callable_func, f.name
 
 
+def _inject_import_statements():
+    import_statements = [
+        "import paddle", "import paddle.fluid as fluid", "from typing import *",
+        "import numpy as np"
+    ]
+    return '\n'.join(import_statements) + '\n'
+
+
 def recover_globals_attribute(src_obj, dst_obj):
     attr_name = '__globals__'
 
     src_globals = getattr(src_obj, attr_name, {})
     dst_globals = getattr(dst_obj, attr_name, {})
 
-    for k, v in src_globals.items():
+    for k, v in six.iteritems(src_globals):
         # ignore builtin attribute.
         if not (k.startswith('__') and k.endswith('__')):
             dst_globals[k] = v
 
 
+def func_to_source_code(function, dedent=True):
+    """
+    Transforms function into raw string of source code.
+    """
+    if not (inspect.isfunction(function) or inspect.ismethod(function)):
+        raise TypeError(
+            "The type of 'function' should be a function or method, but received {}.".
+            format(type(function).__name__))
+    source_code = inspect.getsource(function)
+    if dedent:
+        source_code = textwrap.dedent(source_code)
+
+    return source_code
+
+
 def ast_to_source_code(ast_node):
     """
-    Transformers ast node into source code.
+    Transforms ast node into source code.
     """
     if not isinstance(ast_node, (gast.AST, ast.AST)):
         raise TypeError(
@@ -448,8 +607,10 @@ class IsControlFlowVisitor(gast.NodeVisitor):
     gast.While must meet at least one of the requirements 1 to 5:
         4. has `break` statement.
         5. has `continue` statement.
-    gast.For must meet at least one of the requirements 4 to 6:
+    gast.For must meet at least one of the requirements 4 to 8:
         6. calls `range` function in `for` statement and the argument of range is Tensor.
+        7. calls `enumerate` function in `for` statement and the argument of enumerate is Tensor.
+        8. the iterable varaible in `for` statement is Tensor.
         TODO: Support non-range case
 
     The following examples should not be considered as control_flow_if:
@@ -502,16 +663,27 @@ class IsControlFlowVisitor(gast.NodeVisitor):
 
     def _visit_For(self, node):
         assert isinstance(node, gast.For)
-        # TODO
-        # self.is_control_flow_num += 1
-        if not isinstance(node.iter, gast.Call):
+        if isinstance(node.iter, gast.Call):
+            # for in range(var[0]|var.numpy()[0]) or for in enumerate(var|var.numpy())
+            if isinstance(node.iter.func, gast.Name):
+                if node.iter.func.id == "range" or node.iter.func.id == "enumerate":
+                    for arg in node.iter.args:
+                        self.visit(arg)
+                else:
+                    return
+            # for in var.numpy()
+            elif isinstance(node.iter.func, gast.Attribute):
+                if node.iter.func.attr == 'numpy':
+                    self._visit_Call(node.iter)
+                else:
+                    return
+            else:
+                return
+        elif isinstance(node.iter, gast.Name):
+            # for in var
+            self.visit(node.iter)
+        else:
             return
-        if not isinstance(node.iter.func, gast.Name):
-            return
-        if node.iter.func.id != "range":
-            return
-        for arg in node.iter.args:
-            self.visit(arg)
 
         for child_node in gast.walk(node):
             if isinstance(child_node, (gast.Continue, gast.Break)):
@@ -611,3 +783,737 @@ class IsControlFlowVisitor(gast.NodeVisitor):
 
     def get_compare_nodes_with_tensor(self):
         return self._compare_node_tenor_set
+
+
+class NameNodeReplaceTransformer(gast.NodeTransformer):
+    """
+    This class replaces specified gast.Name node by replace_node.
+    """
+
+    def __init__(self, root_node, target_name, replace_node):
+        assert isinstance(target_name, str)
+
+        # NOTE(liym27):
+        # Use gast.Name to replace gast.Name, otherwise, errors may occur.
+        #
+        # For examples:
+        # If using a gast.Subscript to replace gast.Name, and the original gast.Name
+        # is in the arguments of FunctionDef, an exception will be raised.
+        #
+        # ```
+        # def func(x[i])) # x[i] can not be a argument
+        #    # ...
+        # ```
+
+        assert isinstance(replace_node, gast.Name)
+        self.target_name = target_name
+        self.replace_node = replace_node
+
+        self.visit(root_node)
+
+    def visit_Name(self, node):
+        if node.id == self.target_name:
+            return self.replace_node
+        return node
+
+
+class ForLoopTuplePreTransformer(gast.NodeTransformer):
+    """
+    ForNodeVisitor parses 3 type statements (Here var is VarBase(Tensor) or python variable):
+        1). for x in range(var[*]|var.numpy()[*])
+        2). for x in var|var.numpy()
+        3). for i, x in enumerate(var|var.numpy())
+
+        We chose these 3 types because they are easier (x can be variable name iterating in var).
+        However, users can write tuples in Python for loop, such as
+        1). for var1, var2 in var|var.numpy()
+        2). for t in enumerate(var|var.numpy())
+        2). for i, (var1, var2, va3) in enumerate(var|var.numpy())
+
+        To handle these case, this method will do the rewrite tuple pre-process:
+        1). Non-enumerate case: for var1, var2 in var|var.numpy() will be re-written as:
+          for FOR_ITER_TUPLE_PREFIX_x in var | var.numpy():
+            var1 = FOR_ITER_TUPLE_PREFIX_x[0]
+            var2 = FOR_ITER_TUPLE_PREFIX_x[1]
+        2). Enumerate out tuple case: for t in enumerate(var|var.numpy) will be rewritten as:
+          for FOR_ITER_TUPLE_INDEX_PREFIX_x, FOR_ITER_TUPLE_PREFIX_x in enumerate(var|var.numpy):
+            t = (FOR_ITER_TUPLE_INDEX_PREFIX_x, FOR_ITER_TUPLE_PREFIX_x)
+        3). Enumerate inner tuple case: for i, (var1, (var2, va3)) in enumerate(var|var.numpy()) will
+        be re-written as:
+          for i, FOR_ITER_TUPLE_PREFIX_x in var | var.numpy():
+            var1 = FOR_ITER_TUPLE_PREFIX_x[0]
+            var2 = FOR_ITER_TUPLE_PREFIX_x[1][0]
+            var3 = FOR_ITER_TUPLE_PREFIX_x[1][1]
+    """
+
+    def __init__(self, wrapper_root):
+        self.wrapper_root = wrapper_root
+        self.root = wrapper_root.node
+
+    def transform(self):
+        self.visit(self.root)
+
+    def visit_For(self, node):
+        if self.is_for_enumerate_iter(node):
+            if isinstance(node.target, (gast.Name, gast.Attribute)):
+                # Out tuple case
+                out_tuple_name = ast_to_source_code(node.target).strip()
+                tuple_iter_name = unique_name.generate(
+                    FOR_ITER_TUPLE_INDEX_PREFIX)
+                tuple_var_name = unique_name.generate(FOR_ITER_TUPLE_PREFIX)
+                node.target = gast.Tuple(
+                    elts=[
+                        gast.Name(
+                            id=tuple_iter_name,
+                            ctx=gast.Store(),
+                            annotation=None,
+                            type_comment=None), gast.Name(
+                                id=tuple_var_name,
+                                ctx=gast.Store(),
+                                annotation=None,
+                                type_comment=None)
+                    ],
+                    ctx=gast.Store())
+                node.body.insert(
+                    0,
+                    gast.Assign(
+                        targets=[
+                            gast.Name(
+                                id=out_tuple_name,
+                                ctx=gast.Store(),
+                                annotation=None,
+                                type_comment=None)
+                        ],
+                        value=gast.Tuple(
+                            elts=[
+                                gast.Name(
+                                    id=tuple_iter_name,
+                                    ctx=gast.Load(),
+                                    annotation=None,
+                                    type_comment=None), gast.Name(
+                                        id=tuple_var_name,
+                                        ctx=gast.Load(),
+                                        annotation=None,
+                                        type_comment=None)
+                            ],
+                            ctx=gast.Load())))
+            elif isinstance(node.target, (
+                    gast.List,
+                    gast.Tuple)) and len(node.target.elts) >= 2 and isinstance(
+                        node.target.elts[1], (gast.List, gast.Tuple)):
+                # Inner tuple case
+                inner_tuple_name = unique_name.generate(FOR_ITER_TUPLE_PREFIX)
+                origin_inner_tuple_node = node.target.elts[1]
+                node.target.elts[1] = gast.Name(
+                    id=inner_tuple_name,
+                    ctx=gast.Store(),
+                    annotation=None,
+                    type_comment=None)
+                node.body[0:0] = self.tuple_to_stmts(origin_inner_tuple_node,
+                                                     inner_tuple_name)
+        elif self.is_for_iter(node) and isinstance(node.target,
+                                                   (gast.List, gast.Tuple)):
+            # Non-enumrate case:
+            tuple_name = unique_name.generate(FOR_ITER_TUPLE_PREFIX)
+            origin_tuple_node = node.target
+            node.target = gast.Name(
+                id=tuple_name,
+                ctx=gast.Store(),
+                annotation=None,
+                type_comment=None)
+            node.body[0:0] = self.tuple_to_stmts(origin_tuple_node, tuple_name)
+        return node
+
+    def tuple_to_stmts(self, node, tuple_name, idx=[]):
+        if not isinstance(node, (gast.Tuple, gast.List)):
+            value_node_str = tuple_name
+            for i in idx:
+                value_node_str = value_node_str + "[{}]".format(i)
+
+            node_str = ast_to_source_code(node).strip()
+            assign_node_str = "{} = {}".format(node_str, value_node_str)
+            assign_node = gast.parse(assign_node_str).body[0]
+            return [assign_node]
+
+        # isinstance(node, (gast.Tuple, gast.List))
+        ret = []
+        for i, element in enumerate(node.elts):
+            ret += self.tuple_to_stmts(node.elts[i], tuple_name, idx + [i])
+        return ret
+
+    def is_for_iter(self, for_node):
+        assert isinstance(for_node,
+                          gast.For), "Input node is not gast.For node."
+        if isinstance(for_node.iter, (gast.Name, gast.Attribute)):
+            return True
+        elif isinstance(for_node.iter, gast.Call) and isinstance(
+                for_node.iter.func,
+                gast.Attribute) and for_node.iter.func.attr == 'numpy':
+            return True
+        elif isinstance(for_node.iter, gast.Subscript):
+            return True
+        else:
+            return False
+
+    def is_for_enumerate_iter(self, for_node):
+        assert isinstance(for_node,
+                          gast.For), "Input node is not gast.For node."
+        return isinstance(for_node.iter, gast.Call) and isinstance(
+            for_node.iter.func,
+            gast.Name) and for_node.iter.func.id == "enumerate"
+
+
+class ForNodeVisitor(object):
+    """
+    This class parses python for statement, get transformed 3 statement components of for node
+    three key statements:
+        1). init_stmts: list[node], prepare nodes of for loop, may not only one
+        2). cond_stmt: node, condition node to judge whether continue loop
+        3). body_stmts: list[node], updated loop body, sometimes we should change
+            the original statement in body, not just append new statement
+
+    In this process, the semantics of for does not change.
+
+    Now only can parse 3 type statements (Here var is VarBase(Tensor) or python variable):
+        1). for x in range(var[*]|var.numpy()[*])
+        2). for x in var|var.numpy()
+        3). for i, x enumerate(var|var.numpy())
+    """
+
+    def __init__(self, for_node):
+        assert isinstance(
+            for_node, gast.For
+        ), "Input node for the initialization of ForNodeVisitor is not gast.For node."
+        # 1. original for node
+        self.node = for_node
+
+        # 2. gast.For node main parts
+        self.target = for_node.target
+        # NOTE: type may be Node or list[Node]
+        self.iter_args = for_node.iter if self.is_for_iter(
+        ) else for_node.iter.args
+        self.body = for_node.body
+
+        # 3. key shared node or names
+        # - x:
+        #   - for x in range(***)
+        #   - for x in var|var.numpy()
+        #   - for i, x enumerate(var|var.numpy())
+        self.iter_var_name = self._get_iter_var_name()
+
+        # - created index var to slice Variable: __for_loop_var_index_0
+        #   - for x in var|var.numpy()
+        #   - for i, x enumerate(var|var.numpy())
+        self.iter_idx_name = unique_name.generate(FOR_ITER_INDEX_PREFIX)
+
+        # - created shape var to build loop condition: __for_loop_var_len_0
+        #   - for x in var|var.numpy()
+        #   - for i, x enumerate(var|var.numpy())
+        #   - for x in var
+        self.iter_var_len_name = unique_name.generate(FOR_ITER_VAR_LEN_PREFIX)
+        # - created zip to list var : __for_loop_iter_zip_0
+        self.iter_zip_to_list_name = unique_name.generate(
+            FOR_ITER_ZIP_TO_LIST_PREFIX)
+
+        # - var.numpy()/var
+        #   - for x in var|var.numpy()
+        #   - for i, x enumerate(var|var.numpy())
+        self.iter_node = self._get_iter_node()
+
+        # - enumeate i:
+        #   - for i, x enumerate(var|var.numpy())
+        self.enum_idx_name = self._get_enum_idx_name()
+
+        # - range/enumerate args length
+        self.args_length = None
+
+    def parse(self):
+        self._args_check()
+        if self.is_for_range_iter():
+            return self._parse_for_range_stmts()
+        elif self.is_for_iter():
+            return self._parse_for_stmts()
+        elif self.is_for_enumerate_iter():
+            return self._parse_for_enumerate_stmts()
+        else:
+            return None
+
+    def is_for_range_iter(self):
+        return isinstance(self.node.iter, gast.Call) and isinstance(
+            self.node.iter.func,
+            gast.Name) and self.node.iter.func.id == "range"
+
+    def is_for_iter(self):
+        if isinstance(self.node.iter, (gast.Name, gast.Attribute)):
+            return True
+        elif isinstance(self.node.iter, gast.Call) and isinstance(
+                self.node.iter.func,
+                gast.Attribute) and self.node.iter.func.attr == 'numpy':
+            return True
+        elif isinstance(self.node.iter, gast.Subscript):
+            return True
+        else:
+            return False
+
+    def is_for_enumerate_iter(self):
+        return isinstance(self.node.iter, gast.Call) and isinstance(
+            self.node.iter.func,
+            gast.Name) and self.node.iter.func.id == "enumerate"
+
+    def _args_check(self):
+        if self.is_for_range_iter():
+            self.args_length = len(self.iter_args)
+            assert self.args_length >= 1 and self.args_length <= 3, "range() function takes 1 to 3 arguments"
+        elif self.is_for_enumerate_iter():
+            self.args_length = len(self.iter_args)
+            assert self.args_length >= 1 and self.args_length <= 2, "enumerate() function takes 1 to 2 arguments"
+        else:
+            self.args_length = None
+
+    def _parse_for_range_stmts(self):
+        init_stmts = []
+        init_stmts.append(self._build_index_init_node())
+
+        compare_node = self._build_compare_node()
+        step_node = self._build_step_node()
+        cond_stmt = self._build_cond_stmt(step_node, compare_node)
+
+        body_stmts = self.body
+        body_stmts.append(self._build_index_increase_node(step_node))
+
+        return init_stmts, cond_stmt, body_stmts
+
+    def _parse_for_stmts(self):
+        init_stmts = []
+        init_stmts.extend(self._build_iter_node())
+        init_stmts.append(self._build_index_init_node())
+        init_stmts.append(self._build_var_len_assign_node())
+
+        compare_node = self._build_compare_node()
+        step_node = self._build_step_node()
+        cond_stmt = self._build_cond_stmt(step_node, compare_node)
+
+        body_stmts = self.body
+
+        # NOTE(liym27): Here add a gast.Assign, and the target of it is gast.Name.
+        # In NameNodeReplaceTransformer, using gast.Name to replace gast.Name is safe.
+        target_node, assign_node = self._build_assign_var_slice_node()
+        body_stmts[0:0] = [assign_node]
+        for body_node in body_stmts:
+            NameNodeReplaceTransformer(body_node, self.iter_var_name,
+                                       target_node)
+        body_stmts.append(self._build_index_increase_node(step_node))
+
+        return init_stmts, cond_stmt, body_stmts
+
+    def _parse_for_enumerate_stmts(self):
+        init_stmts = []
+        init_stmts.extend(self._build_iter_node())
+        init_stmts.append(self._build_index_init_node())
+        init_stmts.append(self._build_var_len_assign_node())
+        init_stmts.append(self._build_enum_init_node())
+
+        compare_node = self._build_compare_node()
+        step_node = self._build_step_node()
+        cond_stmt = self._build_cond_stmt(step_node, compare_node)
+
+        body_stmts = self.body
+
+        target_node, assign_node = self._build_assign_var_slice_node()
+        body_stmts[0:0] = [assign_node]
+        for body_node in body_stmts:
+            NameNodeReplaceTransformer(body_node, self.iter_var_name,
+                                       target_node)
+
+        body_stmts.append(self._build_index_increase_node(step_node))
+        body_stmts.append(self._build_enum_increase_node())
+
+        return init_stmts, cond_stmt, body_stmts
+
+    def _build_index_init_node(self):
+        if self.is_for_range_iter():
+            if self.args_length == 1:
+                index_init_value_str = '0'
+            else:
+                index_init_value_str = ast_to_source_code(self.iter_args[
+                    0]).strip()
+
+            index_init_var_name = self.iter_var_name
+        else:
+            index_init_value_str = '0'
+            index_init_var_name = self.iter_idx_name
+
+        index_init_node_source_str = "{target} = {value}".format(
+            target=index_init_var_name, value=index_init_value_str)
+
+        index_init_node = gast.parse(index_init_node_source_str).body[0]
+
+        return index_init_node
+
+    def _build_var_len_assign_node(self):
+        # get the length of iterable variable
+        if isinstance(self.iter_node, gast.Call) and isinstance(
+                self.iter_node.func,
+                gast.Attribute) and self.iter_node.func.attr == 'numpy':
+            iter_var_name = ast_to_source_code(self.iter_node.func.value).strip(
+            )
+        else:
+            iter_var_name = ast_to_source_code(self.iter_node).strip()
+
+        convert_len_node_source_str = '{} = paddle.jit.dy2static.convert_len({})'.format(
+            self.iter_var_len_name, iter_var_name)
+
+        convert_len_node = gast.parse(convert_len_node_source_str).body[0]
+
+        return convert_len_node
+
+    def _build_iter_node(self):
+        """
+        Process special cases for iter_node inclue:
+          - Case 1 (for zip):
+            
+            - for i, val in enumerate(zip(x, y))  # original code:
+            
+            - __for_loop_iter_zip_0 = list(zip(x, y))
+            - for i, val in enumerate(__for_loop_iter_zip_0)
+        """
+        new_nodes = []
+        if isinstance(self.iter_node, gast.Call) and isinstance(
+                self.iter_node.func, gast.Name):
+            if self.iter_node.func.id == 'zip':
+                iter_var_name = ast_to_source_code(self.iter_node).strip()
+                zip_to_list_str = "{target} = list({value})".format(
+                    target=self.iter_zip_to_list_name, value=iter_var_name)
+                zip_to_list_node = gast.parse(zip_to_list_str).body[0]
+                new_nodes.append(zip_to_list_node)
+
+                self.iter_node = gast.Name(
+                    id=self.iter_zip_to_list_name,
+                    ctx=gast.Load(),
+                    annotation=None,
+                    type_comment=None)
+
+        return new_nodes
+
+    def _build_enum_init_node(self):
+        if self.is_for_enumerate_iter() and self.args_length != 1:
+            init_value_str = ast_to_source_code(self.iter_args[1]).strip()
+        else:
+            init_value_str = '0'
+
+        enum_init_node_source_str = "{} = {}".format(self.enum_idx_name,
+                                                     init_value_str)
+        enum_init_node = gast.parse(enum_init_node_source_str).body[0]
+        return enum_init_node
+
+    def _build_compare_node(self):
+        if self.is_for_range_iter():
+            compare_node = self.iter_args[
+                0] if self.args_length == 1 else self.iter_args[1]
+        else:
+            compare_node = gast.Name(
+                id=self.iter_var_len_name,
+                ctx=gast.Load(),
+                annotation=None,
+                type_comment=None)
+        return compare_node
+
+    def _build_step_node(self):
+        if self.is_for_range_iter():
+            step_node = self.iter_args[
+                2] if self.args_length == 3 else gast.Constant(
+                    value=1, kind=None)
+        else:
+            step_node = gast.Constant(value=1, kind=None)
+        return step_node
+
+    def _build_cond_stmt(self, step_node, compare_node):
+        if not isinstance(step_node, (gast.Constant, gast.UnaryOp)):
+            raise NotImplementedError(
+                "Dynamic-to-Static only supports the step value is a constant or negative constant in 'for-range' statements, "
+                "such as '2', '-3'. But received: '{}'. Please fix code to be compatible with Dynamic-to-Static."
+                .format(ast_to_source_code(step_node).strip()))
+
+        if isinstance(step_node, gast.UnaryOp) or step_node.value < 0:
+            # eg:
+            # range(max, min, -2)
+            # ->
+            # i > min
+            return gast.Compare(
+                left=gast.Name(
+                    id=self.iter_var_name
+                    if self.is_for_range_iter() else self.iter_idx_name,
+                    ctx=gast.Load(),
+                    annotation=None,
+                    type_comment=None),
+                ops=[gast.Gt()],
+                comparators=[compare_node])
+        else:
+            # eg:
+            # range(min, max, 2)
+            # ->
+            # i < max
+            return gast.Compare(
+                left=gast.Name(
+                    id=self.iter_var_name
+                    if self.is_for_range_iter() else self.iter_idx_name,
+                    ctx=gast.Load(),
+                    annotation=None,
+                    type_comment=None),
+                ops=[gast.Lt()],
+                comparators=[compare_node])
+
+    def _build_index_increase_node(self, step_node):
+        return gast.AugAssign(
+            target=gast.Name(
+                id=self.iter_var_name
+                if self.is_for_range_iter() else self.iter_idx_name,
+                ctx=gast.Store(),
+                annotation=None,
+                type_comment=None),
+            op=gast.Add(),
+            value=step_node)
+
+    def _build_assign_var_slice_node(self):
+        var_slice_str = "{}[{}]".format(
+            ast_to_source_code(self.iter_node).strip(), self.iter_idx_name)
+        var_slice_node = gast.parse(var_slice_str).body[0].value
+        new_iter_var_name = unique_name.generate(FOR_ITER_VAR_NAME_PREFIX)
+        target_node, assign_node = create_assign_node(new_iter_var_name,
+                                                      var_slice_node)
+        return target_node, assign_node
+
+    def _build_enum_increase_node(self):
+        return gast.AugAssign(
+            target=gast.Name(
+                id=self.enum_idx_name,
+                ctx=gast.Store(),
+                annotation=None,
+                type_comment=None),
+            op=gast.Add(),
+            value=gast.Constant(
+                value=1, kind=None))
+
+    def _get_iter_var_name(self):
+        if self.is_for_range_iter():
+            return self.target.id
+        elif self.is_for_iter():
+            return self.target.id
+        elif self.is_for_enumerate_iter():
+            return self.target.elts[1].id
+        return None
+
+    def _get_iter_node(self):
+        if self.is_for_iter():
+            return self.iter_args
+        elif self.is_for_enumerate_iter():
+            return self.iter_args[0]
+        return None
+
+    def _get_enum_idx_name(self):
+        if self.is_for_enumerate_iter():
+            return self.target.elts[0].id
+        return None
+
+
+class SplitAssignTransformer(gast.NodeTransformer):
+    """
+    This class transforms sequence assignments and multi-target assignments to normal assignments.
+    """
+
+    def __init__(self, ast_node):
+        assert isinstance(ast_node, gast.AST)
+        self.ast_root = ast_node
+
+    def transform(self):
+        self.visit(self.ast_root)
+
+    def visit_Assign(self, node):
+        target_nodes = node.targets
+        if len(target_nodes) == 1:
+            node = self._parse_sequence_assign(node)
+        else:
+            node = self._parse_multi_target_assign(node)
+        return node
+
+    def _parse_sequence_assign(self, node):
+        """
+        a, b = c, d
+        ->
+        a = c
+        b = d
+        """
+        assert isinstance(node, gast.Assign)
+
+        target_nodes = node.targets
+        value_node = node.value
+        if not isinstance(target_nodes[0], (gast.List, gast.Tuple)):
+            return node
+        if not isinstance(value_node, (gast.List, gast.Tuple)):
+            return node
+
+        targets = node.targets[0].elts
+        values = node.value.elts
+        if len(targets) != len(values):
+            return node
+
+        new_nodes = []
+        for target, value in zip(targets, values):
+            assign_node = gast.Assign(targets=[target], value=value)
+            new_nodes.append(assign_node)
+
+        return new_nodes
+
+    def _parse_multi_target_assign(self, node):
+        """
+         Example 1:
+         a = b = c
+         ->
+         b = c
+         a = b
+
+         Example 2:
+         a, b = c, d = x
+         ->
+         c,d = x
+         a = c
+         b = d
+         """
+        assert isinstance(node, gast.Assign)
+
+        target_nodes = node.targets
+        value_node = node.value
+        new_nodes = []
+        for target in reversed(target_nodes):
+            assign_node = gast.Assign(targets=[target], value=value_node)
+            # NOTE: Because assign_node can be sequence assign statement like `a,b = c,d`,
+            # it's necessary to visit this new assign_node
+            parsed_node = self.visit_Assign(assign_node)
+            if not isinstance(parsed_node, list):
+                parsed_node = [parsed_node]
+
+            new_nodes.extend(parsed_node)
+            value_node = target
+
+        return new_nodes
+
+
+# NOTE: inspect.unwrap() exits in PY3 but not in PY2.
+def unwrap(func):
+    """
+    Returns the object wrapped by decorators.
+    """
+
+    def _is_wrapped(f):
+        return hasattr(f, '__wrapped__')
+
+    unwrapped_f = func
+    while (_is_wrapped(unwrapped_f)):
+        unwrapped_f = unwrapped_f.__wrapped__
+
+    return unwrapped_f
+
+
+def input_specs_compatible(src_input_specs, desired_input_specs):
+    """
+    Returns True if the two input specs are compatible, otherwise False.
+
+    args:
+        src_input_spec (list or tuple[InputSpec et.al]): list/tuple of
+            paddle.static.InputSpec or int/str et.al
+        desired_input_specs (list or tuple[InputSpec et.al]): list/tuple of
+            paddle.static.InputSpec or int/str et.al
+    """
+    len_specs = len(src_input_specs)
+    if len_specs != len(desired_input_specs):
+        # NOTE(chenweihang): if the input_spec of jit.save is a subset of
+        # input_spec of to_static, also compatible
+        for spec in src_input_specs:
+            if spec not in desired_input_specs:
+                return False
+    else:
+        for (src_spec, desired_spec) in zip(src_input_specs,
+                                            desired_input_specs):
+            if isinstance(src_spec, paddle.static.InputSpec) or isinstance(
+                    desired_spec, paddle.static.InputSpec):
+                if not _compatible_tensor_spec(src_spec, desired_spec):
+                    return False
+            else:
+                if not _compatible_non_tensor_spec(src_spec, desired_spec):
+                    return False
+
+    return True
+
+
+def _compatible_tensor_spec(src_spec, desired_spec):
+    """
+    Check whether two tensor type spec is compatible.
+    """
+    for spec in [src_spec, desired_spec]:
+        if not isinstance(spec, paddle.static.InputSpec):
+            return False
+    src_shape = src_spec.shape
+    other_shape = desired_spec.shape
+    len_shape = len(src_shape)
+    if len_shape != len(other_shape):
+        return False
+    for j in range(len_shape):
+        if src_shape[j] is None or src_shape[j] < 0:
+            continue
+        if other_shape[j] is None or other_shape[j] < 0:
+            continue
+        if src_shape[j] != other_shape[j]:
+            return False
+
+    src_dtype = convert_dtype(src_spec.dtype)
+    other_dtype = convert_dtype(desired_spec.dtype)
+    if src_dtype != other_dtype:
+        return False
+
+    return True
+
+
+def _compatible_non_tensor_spec(src_spec, desired_spec):
+    """
+    Check whether two non-tensor type spec is compatible.
+    """
+
+    def hash_value(spec):
+        try:
+            hash_val = make_hashable(spec)
+        except:
+            hash_val = None
+        return hash_val
+
+    src_hash_val = hash_value(src_spec)
+    desired_hash_val = hash_value(desired_spec)
+
+    if src_hash_val != desired_hash_val:
+        return False
+    else:
+        return True
+
+
+def slice_is_num(slice_node):
+    # A slice_node.slice can be a:
+    # (1) ast.Index, which is a simple number such as [1], [-2]
+    # (2) ast.Slice, which is represented by bounds such as [2:-1]
+    # (3) ast.Tuple, which includes the above two cases such as [2:-1, 1]
+    # If slice node is case (1), return True, Otherwise, return False.
+    #
+    # NOTE: In (1) case, when gast>=0.4.0, gast.Index is not used, which is replaced
+    # other gast node such as gast.Constant, gast.Name, gast.UnaryOp and so on.
+    # Considering the compatibility of gast, here use ast note to check whether the
+    # node is a num. For more details, please visit https://github.com/serge-sans-paille/gast
+
+    assert isinstance(slice_node, gast.Subscript)
+    slice_node_str = ast_to_source_code(slice_node).strip()
+    ast_node = ast.parse(slice_node_str).body[0].value
+
+    if isinstance(ast_node.slice, (ast.Tuple, ast.Slice)):
+        return False
+
+    if isinstance(ast_node.slice, ast.Index):
+        return True
+
+    return False

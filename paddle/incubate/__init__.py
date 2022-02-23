@@ -12,7 +12,26 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from . import hapi
+from .optimizer import LookAhead  # noqa: F401
+from .optimizer import ModelAverage  # noqa: F401
+from .checkpoint import auto_checkpoint  # noqa: F401
+from ..fluid.layer_helper import LayerHelper  # noqa: F401
+from .operators import softmax_mask_fuse_upper_triangle  # noqa: F401
+from .operators import softmax_mask_fuse  # noqa: F401
+from .tensor import segment_sum
+from .tensor import segment_mean
+from .tensor import segment_max
+from .tensor import segment_min
 
-__all__ = []
-__all__ += hapi.__all__
+from . import nn  #noqa: F401
+
+__all__ = [
+    'LookAhead',
+    'ModelAverage',
+    'softmax_mask_fuse_upper_triangle',
+    'softmax_mask_fuse',
+    'segment_sum',
+    'segment_mean',
+    'segment_max',
+    'segment_min',
+]

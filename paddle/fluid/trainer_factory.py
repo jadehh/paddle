@@ -22,12 +22,12 @@ from paddle.fluid.log_helper import get_logger
 local_logger = get_logger(
     __name__, logging.INFO, fmt='%(asctime)s-%(levelname)s: %(message)s')
 
-from .trainer_desc import MultiTrainer, DistMultiTrainer, PipelineTrainer
+from .trainer_desc import MultiTrainer, DistMultiTrainer, PipelineTrainer, HeterXpuTrainer, PSGPUTrainer
 from .device_worker import Hogwild, DownpourSGD, Section, DownpourSGDOPT
 from .framework import Variable
 from multiprocessing import Process, Manager
 
-__all__ = ["TrainerFactory", "FetchHandler", "FetchHandlerMonitor"]
+__all__ = ["TrainerFactory", "FetchHandlerMonitor"]
 
 
 class TrainerFactory(object):
@@ -49,8 +49,8 @@ class TrainerFactory(object):
             device_worker = Hogwild()
             trainer._set_device_worker(device_worker)
         else:
-            trainer_class = opt_info["trainer"]
-            device_worker_class = opt_info["device_worker"]
+            trainer_class = opt_info.get("trainer", "MultiTrainer")
+            device_worker_class = opt_info.get("device_worker", "Hogwild")
             trainer = globals()[trainer_class]()
             device_worker = globals()[device_worker_class]()
 
@@ -62,16 +62,31 @@ class TrainerFactory(object):
                     trainer._set_mpi_rank(opt_info["mpi_rank"])
                 if opt_info.get("mpi_size") is not None:
                     trainer._set_mpi_size(opt_info["mpi_size"])
-                if opt_info.get("dump_fields") is not None:
+                if opt_info.get("dump_fields") is not None and len(
+                        opt_info.get("dump_fields")) != 0:
                     trainer._set_dump_fields(opt_info["dump_fields"])
-                if opt_info.get("dump_fields_path") is not None:
+                if opt_info.get("dump_fields_path") is not None and len(
+                        opt_info.get("dump_fields_path")) != 0:
                     trainer._set_dump_fields_path(opt_info["dump_fields_path"])
                 if opt_info.get("dump_file_num") is not None:
                     trainer._set_dump_file_num(opt_info["dump_file_num"])
                 if opt_info.get("dump_converter") is not None:
                     trainer._set_dump_converter(opt_info["dump_converter"])
-                if opt_info.get("dump_param") is not None:
+                if opt_info.get("dump_param") is not None and len(
+                        opt_info.get("dump_param")) != 0:
                     trainer._set_dump_param(opt_info["dump_param"])
+                if opt_info.get("worker_places") is not None:
+                    trainer._set_worker_places(opt_info["worker_places"])
+                if opt_info.get("use_ps_gpu") is not None:
+                    trainer._set_use_ps_gpu(opt_info["use_ps_gpu"])
+                if opt_info.get("enable_random_dump") is not None:
+                    trainer._set_enable_random_dump(opt_info[
+                        "enable_random_dump"])
+                if opt_info.get("dump_interval") is not None:
+                    trainer._set_dump_interval(opt_info["dump_interval"])
+                if opt_info.get("random_with_lineid") is not None:
+                    trainer._set_random_with_lineid(opt_info[
+                        "random_with_lineid"])
 
             if "fleet_desc" in opt_info:
                 device_worker._set_fleet_desc(opt_info["fleet_desc"])
@@ -80,6 +95,10 @@ class TrainerFactory(object):
                     trainer._set_use_cvm(opt_info["use_cvm"])
                 if opt_info.get("no_cvm") is not None:
                     trainer._set_no_cvm(opt_info["no_cvm"])
+                if opt_info.get(
+                        "scale_sparse_gradient_with_batch_size") is not None:
+                    trainer._set_scale_sparse_grad_with_batch_size(opt_info[
+                        "scale_sparse_gradient_with_batch_size"])
                 if opt_info.get("scale_datanorm") is not None:
                     trainer._set_scale_datanorm(opt_info["scale_datanorm"])
                 if opt_info.get("adjust_ins_weight") is not None:

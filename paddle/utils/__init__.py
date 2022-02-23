@@ -12,16 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .plot import Ploter
-__all__ = ['dump_config', 'Ploter']
+from . import gast
+from .profiler import ProfilerOptions  # noqa: F401
+from .profiler import Profiler  # noqa: F401
+from .profiler import get_profiler  # noqa: F401
+from .deprecated import deprecated  # noqa: F401
+from .lazy_import import try_import  # noqa: F401
+from .op_version import OpLastCheckpointChecker  # noqa: F401
+from .install_check import run_check  # noqa: F401
+from . import unique_name  # noqa: F401
+from ..fluid.framework import require_version  # noqa: F401
 
-#TODO: define new api under this directory
-# __all__ = ['profiler',
-#            'profiler.cuda_profiler',
-#            'profiler.profiler',
-#            'profiler.reset_profiler',
-#            'profiler.start_profiler',
-#            'profiler.stop_profiler',
-#            'unique_name',
-#            'load_op_library',
-#            'require_version']
+from . import download  # noqa: F401
+from . import image_util  # noqa: F401
+from . import cpp_extension  # noqa: F401
+from . import dlpack
+
+__all__ = [  #noqa
+    'deprecated', 'run_check', 'require_version', 'try_import'
+]

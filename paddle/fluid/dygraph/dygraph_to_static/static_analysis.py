@@ -14,7 +14,7 @@
 
 from __future__ import print_function
 
-import gast
+from paddle.utils import gast
 from .utils import is_paddle_api, is_dygraph_api, is_numpy_api, index_in_list
 
 __all__ = ['AstNodeWrapper', 'NodeVarType', 'StaticAnalysisVisitor']
@@ -69,7 +69,8 @@ class NodeVarType(object):
 
         supported_types = [
             NodeVarType.BOOLEAN, NodeVarType.INT, NodeVarType.FLOAT,
-            NodeVarType.NUMPY_NDARRAY, NodeVarType.TENSOR
+            NodeVarType.NUMPY_NDARRAY, NodeVarType.TENSOR,
+            NodeVarType.PADDLE_RETURN_TYPES
         ]
 
         if in_type1 not in supported_types:
@@ -255,6 +256,14 @@ class StaticAnalysisVisitor(object):
     def get_var_env(self):
         return self.var_env
 
+    def is_tensor_node(self, node):
+        tensor_types = {NodeVarType.TENSOR, NodeVarType.PADDLE_RETURN_TYPES}
+        node_wrapper = self.node_to_wrapper_map.get(node, None)
+        if node_wrapper is None:
+            return False
+        if node_wrapper.node_var_type & tensor_types:
+            return True
+
     def _get_constant_node_type(self, node):
         assert isinstance(node, gast.Constant), \
             "Type of input node should be gast.Constant, but received %s" % type(node)
@@ -359,5 +368,8 @@ class StaticAnalysisVisitor(object):
 
             if isinstance(node.func, gast.Name):
                 return self.var_env.get_var_type(node.func.id)
+        if isinstance(node, gast.Subscript):
+            if self.is_tensor_node(node.value):
+                return {NodeVarType.TENSOR}
 
         return {NodeVarType.STATEMENT}

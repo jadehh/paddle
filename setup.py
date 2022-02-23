@@ -10,7 +10,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="paddle",
-    version="1.8",
+    version="2.2",
     keywords=("pip", "paddle", ""),
     description="paddle",
     long_description="xxx",
@@ -22,6 +22,6 @@ setup(
 
     packages=find_packages(),
     include_package_data=True,
-    platforms="win",
-    install_requires=["numpy","gast","astor","prettytable","funcsigs","pillow","scipy","rarfile","nltk","requests","objgraph","protobuf","six","decorator","shapely","pyclipper"]  # 这个项目需要的第三方库
+    platforms="linux",
+    install_requires=["decorator==5.1.1","six==1.16.0","numpy==1.19.5","protobuf==3.19.4","requests==2.27.1","pillow==8.4.0","astor==0.8.1","scipy==1.5.4"]  # 这个项目需要的第三方库
 )

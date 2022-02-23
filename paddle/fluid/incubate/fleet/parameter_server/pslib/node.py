@@ -13,6 +13,8 @@
 """Defination of Server and Worker."""
 
 from . import ps_pb2 as pslib
+# NOTE: reduce removed in fuctools in python3
+from functools import reduce
 
 
 class Server(object):
@@ -39,7 +41,7 @@ class DownpourServer(Server):
     """
         DownpourServer class is used to generate server program_desc
         Args:
-            server: it is pslib.ServerParameter() 
+            server: it is pslib.ServerParameter()
         Examples:
             server = DownpourServer()
     """
@@ -58,7 +60,7 @@ class DownpourServer(Server):
             table_id(int): id of sparse params table
             strategy(dict): the config dict.
         Returns:
-            return None 
+            return None
         """
 
         for table in self._server.downpour_server_param.downpour_table_param:
@@ -67,7 +69,7 @@ class DownpourServer(Server):
                     return
                 else:
                     raise ValueError("expect table %s type=%s, but actual type=%s" \
-                        %(table_id, pslib.PS_SPARSE_TABLE, table.type))
+                                     %(table_id, pslib.PS_SPARSE_TABLE, table.type))
         if strategy is None:
             strategy = dict()
         table = self._server.downpour_server_param.downpour_table_param.add()
@@ -75,18 +77,18 @@ class DownpourServer(Server):
         table.type = pslib.PS_SPARSE_TABLE
 
         support_sparse_key_list = ['sparse_table_class', 'sparse_compress_in_save', 'sparse_shard_num', \
-                    'sparse_accessor_class', 'sparse_learning_rate', 'sparse_initial_g2sum', 'sparse_initial_range', \
-                    'sparse_weight_bounds', 'sparse_embedx_dim', 'sparse_embedx_threshold', 'sparse_nonclk_coeff', \
-                    'sparse_click_coeff', 'sparse_base_threshold', 'sparse_delta_threshold', 'sparse_delta_keep_days', \
-                    'sparse_delete_after_unseen_days', 'sparse_show_click_decay_rate', 'sparse_delete_threshold', \
-                    'sparse_converter', 'sparse_deconverter', 'sparse_enable_cache', 'sparse_cache_rate', \
-                    'sparse_cache_file_num', 'sparse_beta1_decay_rate', 'sparse_beta2_decay_rate', \
-                    'sparse_ada_epsilon', 'sparse_optimizer', 'sparse_ssd_unseenday_threshold', \
-                    'embed_sparse_optimizer', 'embed_sparse_learning_rate', 'embed_sparse_weight_bounds', \
-                    'embed_sparse_initial_range', 'embed_sparse_initial_g2sum', 'embed_sparse_beta1_decay_rate', \
-                    'embed_sparse_beta2_decay_rate', 'embedx_sparse_optimizer', 'embedx_sparse_learning_rate', \
-                    'embedx_sparse_weight_bounds', 'embedx_sparse_initial_range', 'embedx_sparse_initial_g2sum', \
-                    'embedx_sparse_beta1_decay_rate', 'embedx_sparse_beta2_decay_rate']
+                                   'sparse_accessor_class', 'sparse_learning_rate', 'sparse_initial_g2sum', 'sparse_initial_range', \
+                                   'sparse_weight_bounds', 'sparse_embedx_dim', 'sparse_embedx_threshold', 'sparse_nonclk_coeff', \
+                                   'sparse_click_coeff', 'sparse_base_threshold', 'sparse_delta_threshold', 'sparse_delta_keep_days', \
+                                   'sparse_delete_after_unseen_days', 'sparse_show_click_decay_rate', 'sparse_delete_threshold', \
+                                   'sparse_converter', 'sparse_deconverter', 'sparse_enable_cache', 'sparse_cache_rate', \
+                                   'sparse_cache_file_num', 'sparse_beta1_decay_rate', 'sparse_beta2_decay_rate', \
+                                   'sparse_ada_epsilon', 'sparse_optimizer', 'sparse_ssd_unseenday_threshold', \
+                                   'embed_sparse_optimizer', 'embed_sparse_learning_rate', 'embed_sparse_weight_bounds', \
+                                   'embed_sparse_initial_range', 'embed_sparse_initial_g2sum', 'embed_sparse_beta1_decay_rate', \
+                                   'embed_sparse_beta2_decay_rate', 'embedx_sparse_optimizer', 'embedx_sparse_learning_rate', \
+                                   'embedx_sparse_weight_bounds', 'embedx_sparse_initial_range', 'embedx_sparse_initial_g2sum', \
+                                   'embedx_sparse_beta1_decay_rate', 'embedx_sparse_beta2_decay_rate']
 
         for key in strategy:
             if key not in support_sparse_key_list:
@@ -123,7 +125,7 @@ class DownpourServer(Server):
             support_accessor_class = [
                 'DownpourFeatureValueAccessor', 'DownpourCtrAccessor',
                 'DownpourSparseValueAccessor', 'DownpourCtrDoubleAccessor',
-                'DownpourUnitAccessor'
+                'DownpourUnitAccessor', 'DownpourDoubleUnitAccessor'
             ]
             if strategy.get('sparse_accessor_class') is not None:
                 accessor_class = strategy.get('sparse_accessor_class')
@@ -254,7 +256,7 @@ class DownpourServer(Server):
                 table2.param = 2
                 table2.converter = converter
                 table2.deconverter = deconverter
-            elif accessor_class == 'DownpourUnitAccessor':
+            elif accessor_class == 'DownpourUnitAccessor' or accessor_class == 'DownpourDoubleUnitAccessor':
                 self.add_sparse_table_common_config(table, strategy)
                 self.add_sparse_optimizer(table.accessor.embed_sgd_param,
                                           strategy, "embed_")
@@ -271,7 +273,7 @@ class DownpourServer(Server):
             strategy(dict): the dense config dict
             sparse_table_names(list): sparse table names
         Returns:
-            return None 
+            return None
         """
         fea_dim = 0
         dense_param_vars = []
@@ -289,15 +291,15 @@ class DownpourServer(Server):
                     return
                 else:
                     raise ValueError("expect table %s type=%s, but actual type=%s" \
-                        %(table_id, pslib.PS_DENSE_TABLE, table.type))
+                                     %(table_id, pslib.PS_DENSE_TABLE, table.type))
 
         if strategy is None:
             strategy = dict()
         table = self._server.downpour_server_param.downpour_table_param.add()
         table.table_id = table_id
         support_dense_key_list = ['dense_table_class', 'dense_compress_in_save', 'dense_accessor_class', \
-                'dense_optimizer', 'dense_learning_rate', 'dense_avg_decay', 'dense_ada_decay', \
-                'dense_ada_epsilon', 'dense_mom_decay', 'dense_naive_lr']
+                                  'dense_optimizer', 'dense_learning_rate', 'dense_avg_decay', 'dense_ada_decay', \
+                                  'dense_ada_epsilon', 'dense_mom_decay', 'dense_naive_lr']
 
         for key in strategy:
             if key not in support_dense_key_list:
@@ -336,7 +338,7 @@ class DownpourServer(Server):
             strategy(dict): the datanorm config dict
             sparse_table_names(list): sparse table names
         Returns:
-            return None 
+            return None
         """
         fea_dim = 0
         dense_param_vars = []
@@ -354,12 +356,12 @@ class DownpourServer(Server):
                     return
                 else:
                     raise ValueError("expect table %s type=%s, but actual type=%s" \
-                        %(table_id, pslib.PS_DENSE_TABLE, table.type))
+                                     %(table_id, pslib.PS_DENSE_TABLE, table.type))
         if strategy is None:
             strategy = dict()
 
-        support_datanorm_key_list = ['datanorm_table_class', 'datanorm_compress_in_save',\
-                'datanorm_accessor_class', 'datanorm_operation', 'datanorm_decay_rate']
+        support_datanorm_key_list = ['datanorm_table_class', 'datanorm_compress_in_save', \
+                                     'datanorm_accessor_class', 'datanorm_operation', 'datanorm_decay_rate']
 
         for key in strategy:
             if key not in support_datanorm_key_list:
@@ -380,7 +382,7 @@ class DownpourServer(Server):
         table.accessor.fea_dim = fea_dim
 
     def add_sparse_optimizer(self, sgd, strategy, prefix):
-        optimizer_name = strategy.get(prefix + "sparse_optimizer", "adam")
+        optimizer_name = strategy.get(prefix + "sparse_optimizer", "adagrad")
         sgd.name = optimizer_name
         if optimizer_name == "naive":
             sgd.naive.learning_rate = \
@@ -394,6 +396,19 @@ class DownpourServer(Server):
                 strategy.get(prefix + 'sparse_learning_rate', 0.05)
             sgd.adagrad.initial_range = \
                 strategy.get(prefix + 'sparse_initial_range', 1e-4)
+            if prefix == "embed_":
+                sgd.adagrad.initial_range = 0
+            sgd.adagrad.initial_g2sum = strategy.get(
+                prefix + 'sparse_initial_g2sum', 3)
+            bounds = strategy.get(prefix + 'sparse_weight_bounds', [-10, 10])
+            sgd.adagrad.weight_bounds.extend(bounds)
+        elif optimizer_name == "std_adagrad":
+            sgd.adagrad.learning_rate = \
+                strategy.get(prefix + 'sparse_learning_rate', 0.05)
+            sgd.adagrad.initial_range = \
+                strategy.get(prefix + 'sparse_initial_range', 1e-4)
+            if prefix == "embed_":
+                sgd.adagrad.initial_range = 0
             sgd.adagrad.initial_g2sum = strategy.get(
                 prefix + 'sparse_initial_g2sum', 3)
             bounds = strategy.get(prefix + 'sparse_weight_bounds', [-10, 10])
@@ -462,7 +477,7 @@ class DownpourWorker(Worker):
         DownpourWorker class is used to generate worker program_desc
         Args:
             window (int): push params frequency
-            worker: it is pslib.DownpourTrainerParameter 
+            worker: it is pslib.DownpourTrainerParameter
         Examples:
             worker = DownpourWorker(1)
     """
@@ -482,9 +497,8 @@ class DownpourWorker(Worker):
             slot_key_vars(list): slot key id
             slot_value_vars(list): slot key value after embedding
             slot_value_grads(list): grad of all params, default is None
-
         Returns:
-            return None 
+            return None
         """
         if slot_value_grads is None:
             slot_value_grad_names = \
@@ -499,9 +513,9 @@ class DownpourWorker(Worker):
                 if var.name + "@GRAD" in all_grad_names:
                     slot_value_grad_names.append(var.name + "@GRAD")
             sorted_slot_value_vars = [i for i in slot_value_vars if \
-                i.name + "@GRAD" in slot_value_grad_names]
+                                      i.name + "@GRAD" in slot_value_grad_names]
             sorted_slot_value_vars += [i for i in slot_value_vars if \
-                i.name + "@GRAD" not in slot_value_grad_names]
+                                       i.name + "@GRAD" not in slot_value_grad_names]
             sorted_slot_key_vars = \
                 [value_to_key[v.name] for v in sorted_slot_value_vars]
 
@@ -528,7 +542,7 @@ class DownpourWorker(Worker):
 
     def add_dense_table(self, table_id, learning_rate, param_vars, grad_vars,
                         dense_start_table_id, sparse_table_names):
-        """
+        r"""
         Args:
             table_id(int): id of sparse params table
             learning_rate(float): the learning rate used to update parameters. \
@@ -538,7 +552,7 @@ class DownpourWorker(Worker):
             dense_start_table_id(int): dense table start index
             sparse_table_names(list): sparse table names
         Returns:
-            return None 
+            return None
         """
         sparse_table_name_grad = []
         for name in sparse_table_names:
