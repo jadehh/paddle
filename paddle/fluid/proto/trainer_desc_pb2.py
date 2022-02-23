@@ -13,8 +13,8 @@ from google.protobuf import descriptor_pb2
 _sym_db = _symbol_database.Default()
 
 
-import data_feed_pb2 as data__feed__pb2
-import framework_pb2 as framework__pb2
+import paddle.fluid.proto.data_feed_pb2 as data__feed__pb2
+import paddle.fluid.proto.framework_pb2 as framework__pb2
 
 
 DESCRIPTOR = _descriptor.FileDescriptor(
