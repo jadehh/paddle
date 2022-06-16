@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 # @File     : setup.py.py
 # @Author   : jade
-# @Date     : 2021/4/30 14:05
+# @Date     : 2022/3/30 17:19
 # @Email    : jadehh@1ive.com
 # @Software : Samples
 # @Desc     :
@@ -22,6 +22,6 @@ setup(
 
     packages=find_packages(),
     include_package_data=True,
-    platforms="linux",
-    install_requires=["decorator==5.1.1","six==1.16.0","numpy==1.19.5","protobuf==3.19.4","requests==2.27.1","pillow==8.4.0","astor==0.8.1","scipy==1.5.4"]  # 这个项目需要的第三方库
+    platforms="win",
+    install_requires=["numpy","astor","pillow","scipy","requests","protobuf","six","decorator","shapely==1.8.0","pyclipper"]  # 这个项目需要的第三方库
 )

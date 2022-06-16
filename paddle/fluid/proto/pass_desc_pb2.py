@@ -11,7 +11,11 @@ from google.protobuf import descriptor_pb2
 # @@protoc_insertion_point(imports)
 
 _sym_db = _symbol_database.Default()
-import paddle.fluid.proto.framework_pb2 as framework__pb2
+
+
+from paddle.fluid.proto import framework_pb2 as framework__pb2
+
+
 DESCRIPTOR = _descriptor.FileDescriptor(
   name='pass_desc.proto',
   package='paddle.framework.proto',
