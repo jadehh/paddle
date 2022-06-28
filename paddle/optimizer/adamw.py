@@ -19,9 +19,8 @@ from ..fluid import framework
 from ..fluid.framework import Variable
 from ..fluid.dygraph import base as imperative_base
 from collections.abc import Callable
+from .. import _C_ops
 import paddle
-
-_C_ops = core.ops
 
 __all__ = []
 
@@ -190,9 +189,6 @@ class AdamW(Adam):
 
         self.type = "adamw"
 
-        if core.is_compiled_with_xpu():
-            self.type = "adam"
-
         # Use _auxiliary_vars together with _set_auxiliary_var/_get_auxiliary_var to achieve that.
         self._auxiliary_vars = dict()
 
@@ -259,10 +255,6 @@ class AdamW(Adam):
                 paddle.fluid.layers.assign(input=scaled_param, output=param)
 
     def _append_optimize_op(self, block, param_and_grad):
-        if paddle.is_compiled_with_xpu():
-            self._append_decoupled_weight_decay(block, param_and_grad)
-            return super(AdamW, self)._append_optimize_op(block, param_and_grad)
-
         assert isinstance(block, framework.Block)
         if isinstance(param_and_grad, dict):
             param_and_grad = self._update_param_group(param_and_grad)
@@ -289,7 +281,7 @@ class AdamW(Adam):
         lr = self._create_param_lr(param_and_grad)
 
         # create the adamw optimize op
-        if framework.in_dygraph_mode():
+        if framework._non_static_mode():
             lr_ratio_ = 1. if self._lr_ratio is None else self._lr_ratio(
                 param_and_grad[0])
 

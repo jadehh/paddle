@@ -1,4 +1,4 @@
-# paddleV2.2
+# paddleV2.3 gpu Linux版本
 
 ## 1．打包为wheel文件
 
