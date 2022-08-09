@@ -37,7 +37,17 @@ from paddle.fluid.framework import static_only, Parameter
 from paddle.fluid.executor import Executor, global_scope
 from paddle.fluid.log_helper import get_logger
 
-__all__ = []
+__all__ = [
+    'save_inference_model',
+    'load_inference_model',
+    'serialize_program',
+    'serialize_persistables',
+    'save_to_file',
+    'deserialize_program',
+    'deserialize_persistables',
+    'load_from_file',
+    'normalize_program',
+]
 
 _logger = get_logger(
     __name__, logging.INFO, fmt='%(asctime)s-%(levelname)s: %(message)s')
@@ -157,7 +167,7 @@ def normalize_program(program, feed_vars, fetch_vars):
             exe.run(paddle.static.default_startup_program())
 
             # normalize main program.
-            program = paddle.static.default_main_program()
+            program = default_main_program()
             normalized_program = paddle.static.normalize_program(program, [image], [predict])
 
     """
@@ -192,9 +202,8 @@ def normalize_program(program, feed_vars, fetch_vars):
     with program_guard(program):
         uniq_fetch_vars = []
         for i, var in enumerate(fetch_vars):
-            if var.dtype != paddle.bool:
-                var = layers.scale(
-                    var, 1., name="save_infer_model/scale_{}".format(i))
+            var = layers.scale(
+                var, 1., name="save_infer_model/scale_{}".format(i))
             uniq_fetch_vars.append(var)
         fetch_vars = uniq_fetch_vars
 
@@ -447,9 +456,8 @@ def save_inference_model(path_prefix, feed_vars, fetch_vars, executor,
         fetch_vars(Variable | list[Variable]): Variables returned by inference.
         executor(Executor): The executor that saves the inference model. You can refer
                             to :ref:`api_guide_executor_en` for more details.
-        kwargs: Supported keys including 'program' and "clip_extra". Attention please, kwargs is used for backward compatibility mainly.
+        kwargs: Supported keys including 'program'.Attention please, kwargs is used for backward compatibility mainly.
           - program(Program): specify a program if you don't want to use default main program.
-          - clip_extra(bool): set to True if you want to clip extra information for every operator.
     Returns:
         None
 
@@ -510,11 +518,9 @@ def save_inference_model(path_prefix, feed_vars, fetch_vars, executor,
     _check_vars('fetch_vars', fetch_vars)
 
     program = _get_valid_program(kwargs.get('program', None))
-    clip_extra = kwargs.get('clip_extra', False)
     program = normalize_program(program, feed_vars, fetch_vars)
     # serialize and save program
-    program_bytes = _serialize_program(
-        program._remove_training_info(clip_extra=clip_extra))
+    program_bytes = _serialize_program(program)
     save_to_file(model_path, program_bytes)
     # serialize and save params
     params_bytes = _serialize_persistables(program, executor)
@@ -761,7 +767,7 @@ def load_inference_model(path_prefix, executor, **kwargs):
                 "params_filename cannot be None when path_prefix is None.")
         load_dirname = ''
         program_bytes = model_filename
-        params_bytes = params_filename
+        params_filename = params_filename
     # load from file
     else:
         # check and norm path_prefix
@@ -799,12 +805,12 @@ def load_inference_model(path_prefix, executor, **kwargs):
         program_bytes = load_from_file(model_path)
         load_dirname = os.path.dirname(params_path)
         params_filename = os.path.basename(params_path)
-        # load params data
-        params_path = os.path.join(load_dirname, params_filename)
-        params_bytes = load_from_file(params_path)
 
     # deserialize bytes to program
     program = deserialize_program(program_bytes)
+    # load params data
+    params_path = os.path.join(load_dirname, params_filename)
+    params_bytes = load_from_file(params_path)
     # deserialize bytes to params
     deserialize_persistables(program, params_bytes, executor)
 

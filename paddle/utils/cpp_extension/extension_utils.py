@@ -14,37 +14,28 @@
 
 import os
 import re
+import six
 import sys
 import json
 import glob
-import atexit
 import hashlib
 import logging
 import collections
 import textwrap
 import warnings
 import subprocess
-import threading
 
-from importlib import machinery
 from contextlib import contextmanager
 from setuptools.command import bdist_egg
 
-try:
-    from subprocess import DEVNULL  # py3
-except ImportError:
-    DEVNULL = open(os.devnull, 'wb')
-
+from .. import load_op_library
 from ...fluid import core
 from ...fluid.framework import OpProtoHolder
 from ...sysconfig import get_include, get_lib
 
+logging.basicConfig(
+    format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger("utils.cpp_extension")
-logger.setLevel(logging.INFO)
-formatter = logging.Formatter(fmt='%(asctime)s - %(levelname)s - %(message)s')
-ch = logging.StreamHandler()
-ch.setFormatter(formatter)
-logger.addHandler(ch)
 
 OS_NAME = sys.platform
 IS_WINDOWS = OS_NAME.startswith('win')
@@ -54,22 +45,10 @@ MSVC_COMPILE_FLAGS = [
     '/wd4190', '/EHsc', '/w', '/DGOOGLE_GLOG_DLL_DECL',
     '/DBOOST_HAS_STATIC_ASSERT', '/DNDEBUG', '/DPADDLE_USE_DSO'
 ]
-CLANG_COMPILE_FLAGS = [
-    '-fno-common', '-dynamic', '-DNDEBUG', '-g', '-fwrapv', '-O3', '-arch',
-    'x86_64'
-]
-CLANG_LINK_FLAGS = [
-    '-dynamiclib', '-undefined', 'dynamic_lookup', '-arch', 'x86_64'
-]
 
-MSVC_LINK_FLAGS = ['/MACHINE:X64']
+MSVC_LINK_FLAGS = ['/MACHINE:X64', 'paddle_custom_op.lib']
 
-if core.is_compiled_with_rocm():
-    COMMON_HIPCC_FLAGS = [
-        '-DPADDLE_WITH_HIP', '-DEIGEN_USE_GPU', '-DEIGEN_USE_HIP'
-    ]
-else:
-    COMMON_NVCC_FLAGS = ['-DPADDLE_WITH_CUDA', '-DEIGEN_USE_GPU']
+COMMON_NVCC_FLAGS = ['-DPADDLE_WITH_CUDA', '-DEIGEN_USE_GPU', '-O3']
 
 GCC_MINI_VERSION = (5, 4, 0)
 MSVC_MINI_VERSION = (19, 0, 24215)
@@ -107,15 +86,27 @@ information
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 '''
+USING_NEW_CUSTOM_OP_LOAD_METHOD = True
 
 DEFAULT_OP_ATTR_NAMES = [
     core.op_proto_and_checker_maker.kOpRoleAttrName(),
     core.op_proto_and_checker_maker.kOpRoleVarAttrName(),
     core.op_proto_and_checker_maker.kOpNameScopeAttrName(),
     core.op_proto_and_checker_maker.kOpCreationCallstackAttrName(),
-    core.op_proto_and_checker_maker.kOpDeviceAttrName(),
-    core.op_proto_and_checker_maker.kOpWithQuantAttrName()
+    core.op_proto_and_checker_maker.kOpDeviceAttrName()
 ]
+
+
+# NOTE(chenweihang): In order to be compatible with
+# the two custom op define method, after removing
+# old method, we can remove them together
+def use_new_custom_op_load_method(*args):
+    global USING_NEW_CUSTOM_OP_LOAD_METHOD
+    if len(args) == 0:
+        return USING_NEW_CUSTOM_OP_LOAD_METHOD
+    else:
+        assert len(args) == 1 and isinstance(args[0], bool)
+        USING_NEW_CUSTOM_OP_LOAD_METHOD = args[0]
 
 
 @contextmanager
@@ -131,7 +122,10 @@ def bootstrap_context():
 
 
 def load_op_meta_info_and_register_op(lib_filename):
-    core.load_op_meta_info_and_register_op(lib_filename)
+    if USING_NEW_CUSTOM_OP_LOAD_METHOD:
+        core.load_op_meta_info_and_register_op(lib_filename)
+    else:
+        core.load_op_library(lib_filename)
     return OpProtoHolder.instance().update_op_proto()
 
 
@@ -146,9 +140,6 @@ def custom_write_stub(resource, pyfile):
         import types
         import paddle
         
-        cur_dir = os.path.dirname(os.path.abspath(__file__))
-        so_path = os.path.join(cur_dir, "{resource}")
-        
         def inject_ext_module(module_name, api_names):
             if module_name in sys.modules:
                 return sys.modules[module_name]
@@ -160,6 +151,9 @@ def custom_write_stub(resource, pyfile):
             return new_module
 
         def __bootstrap__():
+            cur_dir = os.path.dirname(os.path.abspath(__file__))
+            so_path = os.path.join(cur_dir, "{resource}")
+
             assert os.path.exists(so_path)
 
             # load custom op shared library with abs path
@@ -169,7 +163,6 @@ def custom_write_stub(resource, pyfile):
         __bootstrap__()
 
         {custom_api}
-
         """).lstrip()
 
     # Parse registerring op information
@@ -271,7 +264,7 @@ class VersionManager:
 def combine_hash(md5, value):
     """
     Return new hash value.
-    DO NOT use `hash()` because it doesn't generate stable value between different process.
+    DO NOT use `hash()` beacuse it doesn't generate stable value between different process.
     See https://stackoverflow.com/questions/27522626/hash-function-in-python-3-3-returns-different-results-between-sessions
     """
     md5.update(repr(value).encode())
@@ -310,13 +303,13 @@ def clean_object_if_change_cflags(so_path, extension):
     if os.path.exists(so_path) and os.path.exists(version_file):
         old_version_info = deserialize(version_file)
         so_version = old_version_info.get(so_name, None)
-        # delete shared library file if version is changed to re-compile it.
+        # delete shared library file if versison is changed to re-compile it.
         if so_version is not None and so_version != versioner.version:
             log_v(
                 "Re-Compiling {}, because specified cflags have been changed. New signature {} has been saved into {}.".
                 format(so_name, versioner.version, version_file))
             os.remove(so_path)
-            # update new version information
+            # upate new version information
             new_version_info = versioner.details
             new_version_info[so_name] = versioner.version
             serialize(version_file, new_version_info)
@@ -333,14 +326,10 @@ def prepare_unix_cudaflags(cflags):
     """
     Prepare all necessary compiled flags for nvcc compiling CUDA files.
     """
-    if core.is_compiled_with_rocm():
-        cflags = COMMON_HIPCC_FLAGS + ['-Xcompiler', '-fPIC'
-                                       ] + cflags + get_rocm_arch_flags(cflags)
-    else:
-        cflags = COMMON_NVCC_FLAGS + [
-            '-ccbin', 'cc', '-Xcompiler', '-fPIC', '--expt-relaxed-constexpr',
-            '-DNVCC'
-        ] + cflags + get_cuda_arch_flags(cflags)
+    cflags = COMMON_NVCC_FLAGS + [
+        '-ccbin', 'cc', '-Xcompiler', '-fPIC', '-w', '--expt-relaxed-constexpr',
+        '-DNVCC'
+    ] + cflags + get_cuda_arch_flags(cflags)
 
     return cflags
 
@@ -376,113 +365,13 @@ def get_cuda_arch_flags(cflags):
     return []
 
 
-def get_rocm_arch_flags(cflags):
-    """
-    For ROCm platform, amdgpu target should be added for HIPCC.
-    """
-    cflags = cflags + ['-fno-gpu-rdc', '-amdgpu-target=gfx906']
-    return cflags
-
-
-def _get_fluid_path():
-    """
-    Return installed fluid dir path.
-    """
-    import paddle
-    return os.path.join(os.path.dirname(paddle.__file__), 'fluid')
-
-
-def _get_core_name():
-    """
-    Return pybind DSO module name.
-    """
-    import paddle
-    ext_name = '.pyd' if IS_WINDOWS else '.so'
-    if not paddle.fluid.core.load_noavx:
-        return 'core_avx' + ext_name
-    else:
-        return 'core_noavx' + ext_name
-
-
-def _get_lib_core_path():
-    """
-    Return real path of libcore_(no)avx.dylib on MacOS.
-    """
-    raw_core_name = _get_core_name()
-    lib_core_name = "lib{}.dylib".format(raw_core_name[:-3])
-    return os.path.join(_get_fluid_path(), lib_core_name)
-
-
-def _get_dll_core_path():
-    """
-    Return real path of libcore_(no)avx.dylib on Windows.
-    """
-    raw_core_name = _get_core_name()
-    dll_core_name = "paddle_pybind.dll"
-    return os.path.join(_get_fluid_path(), dll_core_name)
-
-
-def _reset_so_rpath(so_path):
-    """
-    NOTE(Aurelius84): Runtime path of core_(no)avx.so is modified into `@loader_path/../libs`
-    in setup.py.in. While loading custom op, `@loader_path` is the dirname of custom op
-    instead of `paddle/fluid`. So we modify `@loader_path` from custom dylib into `@rpath`
-    to ensure dynamic loader find it correctly.
-
-    Moreover, we will add `-rpath site-packages/paddle/fluid` while linking the dylib so
-    that we don't need to set `LD_LIBRARY_PATH` any more.
-    """
-    assert os.path.exists(so_path)
-    if OS_NAME.startswith("darwin"):
-        origin_runtime_path = "@loader_path/../libs/"
-        rpath = "@rpath/{}".format(_get_core_name())
-        cmd = 'install_name_tool -change {} {} {}'.format(origin_runtime_path,
-                                                          rpath, so_path)
-
-        run_cmd(cmd)
-
-
-def _get_include_dirs_when_compiling(compile_dir):
-    """
-    Get all include directories when compiling the PaddlePaddle
-    source code.
-    """
-    include_dirs_file = 'includes.txt'
-    path = os.path.abspath(compile_dir)
-    include_dirs_file = os.path.join(path, include_dirs_file)
-    assert os.path.isfile(include_dirs_file), "File {} does not exist".format(
-        include_dirs_file)
-    with open(include_dirs_file, 'r') as f:
-        include_dirs = [line.strip() for line in f.readlines() if line.strip()]
-
-    extra_dirs = ['paddle/fluid/platform']
-    all_include_dirs = list(include_dirs)
-    for extra_dir in extra_dirs:
-        for include_dir in include_dirs:
-            d = os.path.join(include_dir, extra_dir)
-            if os.path.isdir(d):
-                all_include_dirs.append(d)
-    all_include_dirs.append(path)
-    all_include_dirs.sort()
-    return all_include_dirs
-
-
 def normalize_extension_kwargs(kwargs, use_cuda=False):
     """
     Normalize include_dirs, library_dir and other attributes in kwargs.
     """
     assert isinstance(kwargs, dict)
-    compile_include_dirs = []
-    # NOTE: the "_compile_dir" argument is not public to users. It is only
-    # reserved for internal usage. We do not guarantee that this argument
-    # is always valid in the future release versions.
-    compile_dir = kwargs.get("_compile_dir", None)
-    if compile_dir:
-        compile_include_dirs = _get_include_dirs_when_compiling(compile_dir)
-
     # append necessary include dir path of paddle
-    include_dirs = list(kwargs.get('include_dirs', []))
-    include_dirs.extend(compile_include_dirs)
+    include_dirs = kwargs.get('include_dirs', [])
     include_dirs.extend(find_paddle_includes(use_cuda))
 
     kwargs['include_dirs'] = include_dirs
@@ -505,36 +394,21 @@ def normalize_extension_kwargs(kwargs, use_cuda=False):
         # append link flags
         extra_link_args = kwargs.get('extra_link_args', [])
         extra_link_args.extend(MSVC_LINK_FLAGS)
-        lib_core_name = create_sym_link_if_not_exist()
-        extra_link_args.append('{}'.format(lib_core_name))
         if use_cuda:
             extra_link_args.extend(['cudadevrt.lib', 'cudart_static.lib'])
         kwargs['extra_link_args'] = extra_link_args
-
     else:
-        ########################### Linux Platform ###########################
+        # append compile flags
+        add_compile_flag(extra_compile_args, ['-g', '-w'])  # disable warnings
+
+        # append link flags
         extra_link_args = kwargs.get('extra_link_args', [])
-        # On Linux, GCC support '-l:xxx.so' to specify the library name
-        # without `lib` prefix.
-        if OS_NAME.startswith('linux'):
-            extra_link_args.append('-l:{}'.format(_get_core_name()))
-        ########################### MacOS Platform ###########################
+        if use_new_custom_op_load_method():
+            extra_link_args.append('-lpaddle_custom_op')
         else:
-            # See _reset_so_rpath for details.
-            extra_link_args.append('-Wl,-rpath,{}'.format(_get_fluid_path()))
-            # On MacOS, ld don't support `-l:xx`, so we create a
-            # libcore_avx.dylib symbol link.
-            lib_core_name = create_sym_link_if_not_exist()
-            extra_link_args.append('-l{}'.format(lib_core_name))
-        ###########################   -- END --    ###########################
-
-        add_compile_flag(extra_compile_args, ['-w'])  # disable warning
-
+            extra_link_args.append('-lpaddle_framework')
         if use_cuda:
-            if core.is_compiled_with_rocm():
-                extra_link_args.append('-lamdhip64')
-            else:
-                extra_link_args.append('-lcudart')
+            extra_link_args.append('-lcudart')
 
         kwargs['extra_link_args'] = extra_link_args
 
@@ -543,54 +417,10 @@ def normalize_extension_kwargs(kwargs, use_cuda=False):
         runtime_library_dirs.extend(find_paddle_libraries(use_cuda))
         kwargs['runtime_library_dirs'] = runtime_library_dirs
 
-    if compile_dir is None:
-        # Add this compile option to isolate fluid headers
-        add_compile_flag(extra_compile_args, ['-DPADDLE_WITH_CUSTOM_KERNEL'])
     kwargs['extra_compile_args'] = extra_compile_args
 
     kwargs['language'] = 'c++'
     return kwargs
-
-
-def create_sym_link_if_not_exist():
-    """
-    Create soft symbol link of `core_avx.so` or `core_noavx.so`
-    """
-    assert OS_NAME.startswith('darwin') or IS_WINDOWS
-
-    raw_core_name = _get_core_name()
-    core_path = os.path.join(_get_fluid_path(), raw_core_name)
-    if IS_WINDOWS:
-        new_dll_core_path = _get_dll_core_path()
-        # create symbol link on windows
-        if not os.path.exists(new_dll_core_path):
-            try:
-                os.symlink(core_path, new_dll_core_path)
-            except Exception:
-                warnings.warn(
-                    "Failed to create soft symbol link for {}.\n You can run prompt as administrator and execute the "
-                    "following command manually: `mklink {} {}`. Now it will create hard link for {} trickly.".
-                    format(raw_core_name, new_dll_core_path, core_path,
-                           raw_core_name))
-                run_cmd('mklink /H {} {}'.format(new_dll_core_path, core_path))
-        # core_avx or core_noavx with lib suffix
-        assert os.path.exists(new_dll_core_path)
-        return raw_core_name[:-4] + ".lib"
-
-    else:
-        new_lib_core_path = _get_lib_core_path()
-        # create symbol link on mac
-        if not os.path.exists(new_lib_core_path):
-            try:
-                os.symlink(core_path, new_lib_core_path)
-                assert os.path.exists(new_lib_core_path)
-            except Exception:
-                raise RuntimeError(
-                    "Failed to create soft symbol link for {}.\n Please execute the following command manually: `ln -s {} {}`".
-                    format(raw_core_name, core_path, new_lib_core_path))
-
-        # core_avx or core_noavx without suffix
-        return raw_core_name[:-3]
 
 
 def find_cuda_home():
@@ -607,9 +437,9 @@ def find_cuda_home():
             with open(os.devnull, 'w') as devnull:
                 nvcc_path = subprocess.check_output(
                     [which_cmd, 'nvcc'], stderr=devnull)
-                nvcc_path = nvcc_path.decode()
-                # Multi CUDA, select the first
-                nvcc_path = nvcc_path.split('\r\n')[0]
+                if six.PY3:
+                    nvcc_path = nvcc_path.decode()
+                nvcc_path = nvcc_path.rstrip('\r\n')
 
                 # for example: /usr/local/cuda/bin/nvcc
                 cuda_home = os.path.dirname(os.path.dirname(nvcc_path))
@@ -627,37 +457,11 @@ def find_cuda_home():
     if cuda_home and not os.path.exists(
             cuda_home) and core.is_compiled_with_cuda():
         cuda_home = None
+        warnings.warn(
+            "Not found CUDA runtime, please use `export CUDA_HOME= XXX` to specific it."
+        )
 
     return cuda_home
-
-
-def find_rocm_home():
-    """
-    Use heuristic method to find rocm path
-    """
-    # step 1. find in $ROCM_HOME or $ROCM_PATH
-    rocm_home = os.environ.get('ROCM_HOME') or os.environ.get('ROCM_PATH')
-
-    # step 2.  find path by `which nvcc`
-    if rocm_home is None:
-        which_cmd = 'where' if IS_WINDOWS else 'which'
-        try:
-            with open(os.devnull, 'w') as devnull:
-                hipcc_path = subprocess.check_output(
-                    [which_cmd, 'hipcc'], stderr=devnull)
-                hipcc_path = hipcc_path.decode()
-                hipcc_path = hipcc_path.rstrip('\r\n')
-
-                # for example: /opt/rocm/bin/hipcc
-                rocm_home = os.path.dirname(os.path.dirname(hipcc_path))
-        except:
-            rocm_home = "/opt/rocm"
-    # step 3. check whether path is valid
-    if rocm_home and not os.path.exists(
-            rocm_home) and core.is_compiled_with_rocm():
-        rocm_home = None
-
-    return rocm_home
 
 
 def find_cuda_includes():
@@ -673,19 +477,6 @@ def find_cuda_includes():
     return [os.path.join(cuda_home, 'include')]
 
 
-def find_rocm_includes():
-    """
-    Use heuristic method to find rocm include path
-    """
-    rocm_home = find_rocm_home()
-    if rocm_home is None:
-        raise ValueError(
-            "Not found ROCM runtime, please use `export ROCM_PATH= XXX` to specific it."
-        )
-
-    return [os.path.join(rocm_home, 'include')]
-
-
 def find_paddle_includes(use_cuda=False):
     """
     Return Paddle necessary include dir path.
@@ -696,40 +487,10 @@ def find_paddle_includes(use_cuda=False):
     include_dirs = [paddle_include_dir, third_party_dir]
 
     if use_cuda:
-        if core.is_compiled_with_rocm():
-            rocm_include_dir = find_rocm_includes()
-            include_dirs.extend(rocm_include_dir)
-        else:
-            cuda_include_dir = find_cuda_includes()
-            include_dirs.extend(cuda_include_dir)
-
-    if OS_NAME.startswith('darwin'):
-        # NOTE(Aurelius84): Ensure to find std v1 headers correctly.
-        std_v1_includes = find_clang_cpp_include()
-        if std_v1_includes is not None and os.path.exists(std_v1_includes):
-            include_dirs.append(std_v1_includes)
+        cuda_include_dir = find_cuda_includes()
+        include_dirs.extend(cuda_include_dir)
 
     return include_dirs
-
-
-def find_clang_cpp_include(compiler='clang'):
-    std_v1_includes = None
-    try:
-        compiler_version = subprocess.check_output([compiler, "--version"])
-        compiler_version = compiler_version.decode()
-        infos = compiler_version.split("\n")
-        for info in infos:
-            if "InstalledDir" in info:
-                v1_path = info.split(':')[-1].strip()
-                if v1_path and os.path.exists(v1_path):
-                    std_v1_includes = os.path.join(
-                        os.path.dirname(v1_path), 'include/c++/v1')
-    except Exception:
-        # Just raise warnings because the include dir is not required.
-        warnings.warn(
-            "Failed to search `include/c++/v1/` include dirs. Don't worry because it's not required."
-        )
-    return std_v1_includes
 
 
 def find_cuda_libraries():
@@ -749,20 +510,6 @@ def find_cuda_libraries():
     return cuda_lib_dir
 
 
-def find_rocm_libraries():
-    """
-    Use heuristic method to find rocm dynamic lib path
-    """
-    rocm_home = find_rocm_home()
-    if rocm_home is None:
-        raise ValueError(
-            "Not found ROCM runtime, please use `export ROCM_PATH=XXX` to specific it."
-        )
-    rocm_lib_dir = [os.path.join(rocm_home, 'lib')]
-
-    return rocm_lib_dir
-
-
 def find_paddle_libraries(use_cuda=False):
     """
     Return Paddle necessary library dir path.
@@ -771,15 +518,8 @@ def find_paddle_libraries(use_cuda=False):
     paddle_lib_dirs = [get_lib()]
 
     if use_cuda:
-        if core.is_compiled_with_rocm():
-            rocm_lib_dir = find_rocm_libraries()
-            paddle_lib_dirs.extend(rocm_lib_dir)
-        else:
-            cuda_lib_dir = find_cuda_libraries()
-            paddle_lib_dirs.extend(cuda_lib_dir)
-
-    # add `paddle/fluid` to search `core_avx.so` or `core_noavx.so`
-    paddle_lib_dirs.append(_get_fluid_path())
+        cuda_lib_dir = find_cuda_libraries()
+        paddle_lib_dirs.extend(cuda_lib_dir)
 
     return paddle_lib_dirs
 
@@ -828,6 +568,9 @@ def get_build_directory(verbose=False):
         if IS_WINDOWS:
             root_extensions_directory = os.path.normpath(
                 root_extensions_directory)
+        elif OS_NAME.startswith('darwin'):
+            # TODO(Aurelius84): consider macOs
+            raise NotImplementedError("Not support Mac now.")
 
         log_v("$PADDLE_EXTENSION_DIR is not set, using path: {} by default.".
               format(root_extensions_directory), verbose)
@@ -843,6 +586,7 @@ def parse_op_info(op_name):
     Parse input names and outpus detail information from registered custom op
     from OpInfoMap.
     """
+    from paddle.fluid.framework import OpProtoHolder
     if op_name not in OpProtoHolder.instance().op_proto_map:
         raise ValueError(
             "Please load {} shared library file firstly by `paddle.utils.cpp_extension.load_op_meta_info_and_register_op(...)`".
@@ -864,8 +608,6 @@ def _import_module_from_library(module_name, build_directory, verbose=False):
     """
     if IS_WINDOWS:
         dynamic_suffix = '.pyd'
-    elif OS_NAME.startswith('darwin'):
-        dynamic_suffix = '.dylib'
     else:
         dynamic_suffix = '.so'
     ext_path = os.path.join(build_directory, module_name + dynamic_suffix)
@@ -889,71 +631,39 @@ def _generate_python_module(module_name,
     """
     Automatically generate python file to allow import or load into as module
     """
-
-    def remove_if_exit(filepath):
-        if os.path.exists(filepath):
-            os.remove(filepath)
-
-    # NOTE: Use unique id as suffix to avoid write same file at same time in
-    # both multi-thread and multi-process.
-    thread_id = str(threading.currentThread().ident)
-    api_file = os.path.join(build_directory,
-                            module_name + '_' + thread_id + '.py')
+    api_file = os.path.join(build_directory, module_name + '.py')
     log_v("generate api file: {}".format(api_file), verbose)
 
-    # delete the temp file before exit python process    
-    atexit.register(lambda: remove_if_exit(api_file))
-
-    # write into .py file with RWLockc
+    # write into .py file
     api_content = [_custom_api_content(op_name) for op_name in op_names]
     with open(api_file, 'w') as f:
         f.write('\n\n'.join(api_content))
 
     # load module
-    custom_module = _load_module_from_file(api_file, module_name, verbose)
+    custom_module = _load_module_from_file(api_file, verbose)
     return custom_module
 
 
 def _custom_api_content(op_name):
-    params_str, ins_str, attrs_str, outs_str, in_names, attrs_names = _get_api_inputs_str(
-        op_name)
-    lower_in_names = [p.split("@")[0].lower() for p in in_names]
+    params_str, ins_str, attrs_str, outs_str = _get_api_inputs_str(op_name)
+
     API_TEMPLATE = textwrap.dedent("""
-        import paddle.fluid.core as core
-        from paddle.fluid.core import VarBase, CustomOpKernelContext
-        from paddle.fluid.framework import _non_static_mode, _dygraph_tracer, _in_legacy_dygraph, in_dygraph_mode
         from paddle.fluid.layer_helper import LayerHelper
-        
+
         def {op_name}({inputs}):
+            helper = LayerHelper("{op_name}", **locals())
+
             # prepare inputs and outputs
             ins = {ins}
             attrs = {attrs}
             outs = {{}}
             out_names = {out_names}
-
-            # The output variable's dtype use default value 'float32',
-            # and the actual dtype of output variable will be inferred in runtime.
-            if in_dygraph_mode():
-                ctx = CustomOpKernelContext()
-                for i in {in_names}:
-                    ctx.add_inputs(i)
-                for j in {attr_names}:
-                    ctx.add_attr(j)
-                for out_name in out_names:
-                    outs[out_name] = core.eager.Tensor()
-                    ctx.add_outputs(outs[out_name])
-                core.eager._run_custom_op(ctx, "{op_name}", True)
-            else:
-                if _in_legacy_dygraph():
-                    for out_name in out_names:
-                        outs[out_name] = VarBase()
-                    _dygraph_tracer().trace_op(type="{op_name}", inputs=ins, outputs=outs, attrs=attrs)
-                else:
-                    helper = LayerHelper("{op_name}", **locals())
-                    for out_name in out_names:
-                        outs[out_name] = helper.create_variable(dtype='float32')
-
-                    helper.append_op(type="{op_name}", inputs=ins, outputs=outs, attrs=attrs)
+            for out_name in out_names:
+                # Set 'float32' temporarily, and the actual dtype of output variable will be inferred
+                # in runtime.
+                outs[out_name] = helper.create_variable(dtype='float32')
+            
+            helper.append_op(type="{op_name}", inputs=ins, outputs=outs, attrs=attrs)
 
             res = [outs[out_name] for out_name in out_names]
 
@@ -966,15 +676,12 @@ def _custom_api_content(op_name):
         inputs=params_str,
         ins=ins_str,
         attrs=attrs_str,
-        # "[x, y, z]""
-        in_names="[" + ",".join(lower_in_names) + "]",
-        attr_names="[" + ",".join(attrs_names) + "]",
         out_names=outs_str)
 
     return api_content
 
 
-def _load_module_from_file(api_file_path, module_name, verbose=False):
+def _load_module_from_file(api_file_path, verbose=False):
     """
     Load module from python file.
     """
@@ -984,11 +691,14 @@ def _load_module_from_file(api_file_path, module_name, verbose=False):
 
     # Unique readable module name to place custom api.
     log_v('import module from file: {}'.format(api_file_path), verbose)
-    ext_name = "_paddle_cpp_extension_" + module_name
-
-    # load module with RWLock
-    loader = machinery.SourceFileLoader(ext_name, api_file_path)
-    module = loader.load_module()
+    ext_name = "_paddle_cpp_extension_"
+    if six.PY2:
+        import imp
+        module = imp.load_source(ext_name, api_file_path)
+    else:
+        from importlib import machinery
+        loader = machinery.SourceFileLoader(ext_name, api_file_path)
+        module = loader.load_module()
 
     return module
 
@@ -1000,23 +710,18 @@ def _get_api_inputs_str(op_name):
     in_names, out_names, attr_names = parse_op_info(op_name)
     # e.g: x, y, z
     param_names = in_names + attr_names
-    # NOTE(chenweihang): we add suffix `@VECTOR` for std::vector<Tensor> input,
-    # but the string contains `@` cannot used as argument name, so we split
-    # input name by `@`, and only use first substr as argument
-    params_str = ','.join([p.split("@")[0].lower() for p in param_names])
+    params_str = ','.join([p.lower() for p in param_names])
     # e.g: {'X': x, 'Y': y, 'Z': z}
-    ins_str = "{%s}" % ','.join([
-        "'{}' : {}".format(in_name, in_name.split("@")[0].lower())
-        for in_name in in_names
-    ])
+    ins_str = "{%s}" % ','.join(
+        ["'{}' : {}".format(in_name, in_name.lower()) for in_name in in_names])
     # e.g: {'num': n}
     attrs_str = "{%s}" % ",".join([
-        "'{}' : {}".format(attr_name, attr_name.split("@")[0].lower())
+        "'{}' : {}".format(attr_name, attr_name.lower())
         for attr_name in attr_names
     ])
     # e.g: ['Out', 'Index']
     outs_str = "[%s]" % ','.join(["'{}'".format(name) for name in out_names])
-    return params_str, ins_str, attrs_str, outs_str, in_names, attr_names
+    return params_str, ins_str, attrs_str, outs_str
 
 
 def _write_setup_file(name,
@@ -1035,7 +740,9 @@ def _write_setup_file(name,
     import os
     from paddle.utils.cpp_extension import CppExtension, CUDAExtension, BuildExtension, setup
     from paddle.utils.cpp_extension import get_build_directory
+    from paddle.utils.cpp_extension.extension_utils import use_new_custom_op_load_method
 
+    use_new_custom_op_load_method({use_new_method})
 
     setup(
         name='{name}',
@@ -1063,7 +770,8 @@ def _write_setup_file(name,
         extra_cxx_cflags=list2str(extra_cxx_cflags),
         extra_cuda_cflags=list2str(extra_cuda_cflags),
         extra_link_args=list2str(link_args),
-        build_dir=build_dir)
+        build_dir=build_dir,
+        use_new_method=use_new_custom_op_load_method())
 
     log_v('write setup.py into {}'.format(file_path), verbose)
     with open(file_path, 'w') as f:
@@ -1080,21 +788,24 @@ def list2str(args):
     return repr(args)
 
 
-def _jit_compile(file_path, verbose=False):
+def _jit_compile(file_path, interpreter=None, verbose=False):
     """
     Build shared library in subprocess
     """
     ext_dir = os.path.dirname(file_path)
     setup_file = os.path.basename(file_path)
 
-    # Using interpreter same with current process.
-    interpreter = sys.executable
-
+    if interpreter is None:
+        interpreter = 'python'
     try:
+        which = 'where' if IS_WINDOWS else 'which'
+        py_path = subprocess.check_output([which, interpreter])
         py_version = subprocess.check_output([interpreter, '-V'])
-        py_version = py_version.decode()
+        if six.PY3:
+            py_path = py_path.decode()
+            py_version = py_version.decode()
         log_v("Using Python interpreter: {}, version: {}".format(
-            interpreter, py_version.strip()), verbose)
+            py_path.strip(), py_version.strip()), verbose)
     except Exception:
         _, error, _ = sys.exc_info()
         raise RuntimeError(
@@ -1118,7 +829,11 @@ def parse_op_name_from(sources):
     """
 
     def regex(content):
-        pattern = re.compile(r'PD_BUILD_OP\(([^,\)]+)\)')
+        if USING_NEW_CUSTOM_OP_LOAD_METHOD:
+            pattern = re.compile(r'PD_BUILD_OP\(([^,\)]+)\)')
+        else:
+            pattern = re.compile(r'REGISTER_OPERATOR\(([^,]+),')
+
         content = re.sub(r'\s|\t|\n', '', content)
         op_name = pattern.findall(content)
         op_name = set([re.sub('_grad', '', name) for name in op_name])
@@ -1140,6 +855,10 @@ def run_cmd(command, verbose=False):
     """
     # logging
     log_v("execute command: {}".format(command), verbose)
+    try:
+        from subprocess import DEVNULL  # py3
+    except ImportError:
+        DEVNULL = open(os.devnull, 'wb')
 
     # execute command
     try:
@@ -1162,19 +881,20 @@ def check_abi_compatibility(compiler, verbose=False):
     if os.environ.get('PADDLE_SKIP_CHECK_ABI') in ['True', 'true', '1']:
         return True
 
-    if not IS_WINDOWS:
-        cmd_out = subprocess.check_output(
-            ['which', compiler], stderr=subprocess.STDOUT)
-        compiler_path = os.path.realpath(cmd_out.decode()).strip()
-        # if not found any suitable compiler, raise warning
-        if not any(name in compiler_path
-                   for name in _expected_compiler_current_platform()):
-            warnings.warn(
-                WRONG_COMPILER_WARNING.format(
-                    user_compiler=compiler,
-                    paddle_compiler=_expected_compiler_current_platform()[0],
-                    platform=OS_NAME))
-            return False
+    which = 'where' if IS_WINDOWS else 'which'
+    cmd_out = subprocess.check_output(
+        [which, compiler], stderr=subprocess.STDOUT)
+    compiler_path = os.path.realpath(cmd_out.decode()
+                                     if six.PY3 else cmd_out).strip()
+    # step 1. if not found any suitable compiler, raise error
+    if not any(name in compiler_path
+               for name in _expected_compiler_current_platform()):
+        warnings.warn(
+            WRONG_COMPILER_WARNING.format(
+                user_compiler=compiler,
+                paddle_compiler=_expected_compiler_current_platform()[0],
+                platform=OS_NAME))
+        return False
 
     version = (0, 0, 0)
     # clang++ have no ABI compatibility problem
@@ -1185,16 +905,15 @@ def check_abi_compatibility(compiler, verbose=False):
             mini_required_version = GCC_MINI_VERSION
             version_info = subprocess.check_output(
                 [compiler, '-dumpfullversion', '-dumpversion'])
-            version_info = version_info.decode()
+            if six.PY3:
+                version_info = version_info.decode()
             version = version_info.strip().split('.')
         elif IS_WINDOWS:
             mini_required_version = MSVC_MINI_VERSION
             compiler_info = subprocess.check_output(
                 compiler, stderr=subprocess.STDOUT)
-            try:
-                compiler_info = compiler_info.decode('UTF-8')
-            except UnicodeDecodeError:
-                compiler_info = compiler_info.decode('gbk')
+            if six.PY3:
+                compiler_info = compiler_info.decode()
             match = re.search(r'(\d+)\.(\d+)\.(\d+)', compiler_info.strip())
             if match is not None:
                 version = match.groups()
@@ -1233,4 +952,4 @@ def log_v(info, verbose=True):
     Print log information on stdout.
     """
     if verbose:
-        logger.info(info)
+        logging.info(info)

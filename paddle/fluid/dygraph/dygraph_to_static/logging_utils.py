@@ -143,10 +143,9 @@ class TranslatorLogger(object):
             self._output_to_stdout('ERROR: ' + msg, *args)
 
     def warn(self, msg, *args, **kwargs):
-        if self.verbosity_level != -1:
-            self.logger.warning(msg, *args, **kwargs)
-            if self.need_to_echo_log_to_stdout:
-                self._output_to_stdout('WARNING: ' + msg, *args)
+        self.logger.warning(msg, *args, **kwargs)
+        if self.need_to_echo_log_to_stdout:
+            self._output_to_stdout('WARNING: ' + msg, *args)
 
     def log(self, level, msg, *args, **kwargs):
         if self.has_verbosity(level):

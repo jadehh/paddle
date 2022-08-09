@@ -15,7 +15,7 @@
 from PIL import Image
 from paddle.utils import try_import
 
-__all__ = []
+__all__ = ['set_image_backend', 'get_image_backend', 'image_load']
 
 _image_backend = 'pil'
 
@@ -80,9 +80,9 @@ def set_image_backend(backend):
             shutil.rmtree(temp_dir)
     """
     global _image_backend
-    if backend not in ['pil', 'cv2', 'tensor']:
+    if backend not in ['pil', 'cv2']:
         raise ValueError(
-            "Expected backend are one of ['pil', 'cv2', 'tensor'], but got {}"
+            "Expected backend are one of ['pil', 'cv2'], but got {}"
             .format(backend))
     _image_backend = backend
 
@@ -150,13 +150,13 @@ def image_load(path, backend=None):
 
     if backend is None:
         backend = _image_backend
-    if backend not in ['pil', 'cv2', 'tensor']:
+    if backend not in ['pil', 'cv2']:
         raise ValueError(
-            "Expected backend are one of ['pil', 'cv2', 'tensor'], but got {}"
+            "Expected backend are one of ['pil', 'cv2'], but got {}"
             .format(backend))
 
     if backend == 'pil':
         return Image.open(path)
-    elif backend == 'cv2':
+    else:
         cv2 = try_import('cv2')
         return cv2.imread(path)

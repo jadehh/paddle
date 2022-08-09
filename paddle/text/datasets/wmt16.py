@@ -27,7 +27,7 @@ from paddle.io import Dataset
 import paddle.compat as cpt
 from paddle.dataset.common import _check_exists_and_download
 
-__all__ = []
+__all__ = ['WMT16']
 
 DATA_URL = ("http://paddlemodels.bj.bcebos.com/wmt/wmt16.tar.gz")
 DATA_MD5 = "0c38be43600334966403524a40dcd81e"
@@ -71,10 +71,7 @@ class WMT16(Dataset):
             :attr:`data_file` is not set. Default True
 
     Returns:
-        Dataset: Instance of WMT16 dataset. The instance of dataset has 3 fields:
-            - src_ids (np.array) - The sequence of token ids of source language.
-            - trg_ids (np.array) - The sequence of token ids of target language.
-            - trg_ids_next (np.array) - The next sequence of token ids of target language.
+        Dataset: instance of WMT16 dataset
 
     Examples:
 

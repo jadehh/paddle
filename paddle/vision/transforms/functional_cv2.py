@@ -33,8 +33,6 @@ else:
     Sequence = collections.abc.Sequence
     Iterable = collections.abc.Iterable
 
-__all__ = []
-
 
 def to_tensor(pic, data_format='CHW'):
     """Converts a ``numpy.ndarray`` to paddle.Tensor.
@@ -51,7 +49,7 @@ def to_tensor(pic, data_format='CHW'):
 
     """
 
-    if data_format not in ['CHW', 'HWC']:
+    if not data_format in ['CHW', 'HWC']:
         raise ValueError('data_format should be CHW or HWC. Got {}'.format(
             data_format))
 
@@ -138,8 +136,8 @@ def pad(img, padding, fill=0, padding_mode='constant'):
     Args:
         img (np.array): Image to be padded.
         padding (int|list|tuple): Padding on each border. If a single int is provided this
-            is used to pad all borders. If list/tuple of length 2 is provided this is the padding
-            on left/right and top/bottom respectively. If a list/tuple of length 4 is provided
+            is used to pad all borders. If tuple of length 2 is provided this is the padding
+            on left/right and top/bottom respectively. If a tuple of length 4 is provided
             this is the padding for the left, top, right and bottom borders
             respectively.
         fill (float, optional): Pixel fill value for constant fill. If a tuple of
@@ -394,8 +392,7 @@ def adjust_hue(img, hue_factor):
     cv2 = try_import('cv2')
 
     if not (-0.5 <= hue_factor <= 0.5):
-        raise ValueError('hue_factor:{} is not in [-0.5, 0.5].'.format(
-            hue_factor))
+        raise ValueError('hue_factor is not in [-0.5, 0.5].'.format(hue_factor))
 
     dtype = img.dtype
     img = img.astype(np.uint8)

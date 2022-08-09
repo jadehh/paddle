@@ -12,8 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .auto_cast import auto_cast  # noqa: F401
-from .grad_scaler import GradScaler  # noqa: F401
-from .auto_cast import decorate  # noqa: F401
+from .auto_cast import auto_cast
+from .grad_scaler import GradScaler
 
-__all__ = ['auto_cast', 'GradScaler', 'decorate']
+__all__ = ['auto_cast', 'GradScaler']

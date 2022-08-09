@@ -16,7 +16,6 @@ from __future__ import print_function
 import six
 from . import layers
 from .data_feeder import check_variable_and_dtype, convert_dtype
-from ..utils import deprecated
 
 __all__ = [
     "simple_img_conv_pool",
@@ -333,7 +332,6 @@ def sequence_conv_pool(input,
     return pool_out
 
 
-@deprecated(since="2.0.0", update_to="paddle.nn.functional.glu")
 def glu(input, dim=-1):
     r"""
 	:api_attr: Static Graph

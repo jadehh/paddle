@@ -23,7 +23,6 @@ import pickle
 import contextlib
 from functools import reduce
 import sys
-from io import BytesIO
 
 import numpy as np
 import math
@@ -70,52 +69,6 @@ __all__ = [
 
 _logger = get_logger(
     __name__, logging.INFO, fmt='%(asctime)s-%(levelname)s: %(message)s')
-
-
-class _open_buffer(object):
-    def __init__(self, buffer):
-        self.buffer = buffer
-
-    def __enter__(self):
-        return self.buffer
-
-
-class _buffer_reader(_open_buffer):
-    def __init__(self, buffer):
-        super(_buffer_reader, self).__init__(buffer)
-        self.initial_tell = self.buffer.tell()
-
-    def __exit__(self, *args):
-        # `args[0]` is type of exception. When the `read` is abnormal, the file pointer returns to the initial position.
-        if args[0] is not None:
-            self.buffer.seek(self.initial_tell)
-
-
-class _buffer_writer(_open_buffer):
-    def __exit__(self, *args):
-        self.buffer.flush()
-
-
-def _is_file_path(path):
-    return isinstance(path, str)
-
-
-def _open_file_buffer(path_or_buffer, mode):
-
-    if _is_file_path(path_or_buffer):
-        return open(path_or_buffer, mode)
-    else:
-        if 'w' in mode:
-            return _buffer_writer(path_or_buffer)
-        elif 'r' in mode:
-            return _buffer_reader(path_or_buffer)
-        else:
-            raise ValueError("Expected 'r' or 'w' in mode but got {}".format(
-                mode))
-
-
-def _is_memory_buffer(buffer):
-    return isinstance(buffer, BytesIO)
 
 
 def is_parameter(var):
@@ -1042,7 +995,7 @@ def load_params(executor, dirname, main_program=None, filename=None):
 def load_persistables(executor, dirname, main_program=None, filename=None):
     """
     :api_attr: Static Graph
-
+    
     This API filters out all variables with ``persistable==True`` from the
     given ``main_program`` and then tries to load these variables from the
     directory ``dirname`` or the file ``filename``.
@@ -1251,8 +1204,7 @@ def save_inference_model(dirname,
                          model_filename=None,
                          params_filename=None,
                          export_for_deployment=True,
-                         program_only=False,
-                         clip_extra=False):
+                         program_only=False):
     """
     :api_attr: Static Graph
 
@@ -1373,9 +1325,15 @@ def save_inference_model(dirname,
             )
             break
 
+    # fix the bug that the activation op's output as target will be pruned.
+    # will affect the inference performance.
+    # TODO(Superjomn) add an IR pass to remove 1-scale op.
     with program_guard(main_program):
         uniq_target_vars = []
         for i, var in enumerate(target_vars):
+            if isinstance(var, Variable):
+                var = layers.scale(
+                    var, 1., name="save_infer_model/scale_{}".format(i))
             uniq_target_vars.append(var)
         target_vars = uniq_target_vars
     target_var_name_list = [var.name for var in target_vars]
@@ -1421,30 +1379,18 @@ def save_inference_model(dirname,
         main_program = main_program._inference_optimize(prune_read_op=True)
         fetch_var_names = [v.name for v in target_vars]
 
-        for target_v in target_vars:
-            if not main_program.global_block().has_var(target_v.name):
-                main_program.global_block().create_var(
-                    name=target_v.name,
-                    shape=target_v.shape,
-                    dtype=target_v.dtype,
-                    persistable=target_v.persistable)
-
         prepend_feed_ops(main_program, feeded_var_names)
         append_fetch_ops(main_program, fetch_var_names)
 
         main_program.desc._set_version()
         paddle.fluid.core.save_op_version_info(main_program.desc)
         with open(model_basename, "wb") as f:
-            f.write(
-                main_program._remove_training_info(clip_extra=clip_extra)
-                .desc.serialize_to_string())
+            f.write(main_program.desc.serialize_to_string())
     else:
         # TODO(panyx0718): Save more information so that it can also be used
         # for training and more flexible post-processing.
         with open(model_basename + ".main_program", "wb") as f:
-            f.write(
-                main_program._remove_training_info(clip_extra=clip_extra)
-                .desc.serialize_to_string())
+            f.write(main_program.desc.serialize_to_string())
 
     if program_only:
         warnings.warn(
@@ -1819,32 +1765,7 @@ def _pack_loaded_dict(load_obj):
 
 
 @static_only
-def _legacy_save(param_dict, model_path, protocol=2):
-    def get_tensor(var):
-        if isinstance(var, (core.VarBase, core.eager.Tensor)):
-            return var.numpy()
-        elif isinstance(var, core.LoDTensor):
-            return np.array(var)
-        return var
-
-    param_dict = {name: get_tensor(param_dict[name]) for name in param_dict}
-
-    # When value of dict is lager than 4GB ,there is a Bug on 'MAC python3'
-    if _is_file_path(
-            model_path
-    ) and sys.platform == 'darwin' and sys.version_info.major == 3:
-        pickle_bytes = pickle.dumps(param_dict, protocol=protocol)
-        with open(model_path, 'wb') as f:
-            max_bytes = 2**30
-            for i in range(0, len(pickle_bytes), max_bytes):
-                f.write(pickle_bytes[i:i + max_bytes])
-    else:
-        with _open_file_buffer(model_path, 'wb') as f:
-            pickle.dump(param_dict, f, protocol=protocol)
-
-
-@static_only
-def save(program, model_path, protocol=4, **configs):
+def save(program, model_path, pickle_protocol=2):
     """
     :api_attr: Static Graph
 
@@ -1857,9 +1778,8 @@ def save(program, model_path, protocol=4, **configs):
     Args:
         program(Program) : The program to saved.
         model_path(str): the file prefix to save the program. The format is "dirname/file_prefix". If file_prefix is empty str. A exception will be raised
-        protocol(int, optional): The protocol version of pickle module must be greater than 1 and less than 5.
-                                 Default: 4
-        configs(dict, optional) : optional keyword arguments.                        
+        pickle_protocol(int, optional): The protocol version of pickle module must be greater than 1 and less than 5.
+                                 Default: 2
 
     Returns:
         None
@@ -1887,19 +1807,14 @@ def save(program, model_path, protocol=4, **configs):
     base_name = os.path.basename(model_path)
     assert base_name != "", \
         "The input model_path MUST be format of dirname/filename [dirname\\filename in Windows system], but received model_path is empty string."
-    if 'pickle_protocol' in configs:
-        protocol = configs['pickle_protocol']
-        warnings.warn(
-            "'pickle_protocol' is a deprecated argument. Please use 'protocol' instead."
-        )
 
-    if not isinstance(protocol, int):
+    if not isinstance(pickle_protocol, int):
         raise ValueError("The 'protocol' MUST be `int`, but received {}".format(
-            type(protocol)))
+            type(pickle_protocol)))
 
-    if protocol < 2 or protocol > 4:
+    if pickle_protocol < 2 or pickle_protocol > 4:
         raise ValueError("Expected 1<'protocol'<5, but received protocol={}".
-                         format(protocol))
+                         format(pickle_protocol))
 
     dir_name = os.path.dirname(model_path)
     if dir_name and not os.path.exists(dir_name):
@@ -1912,25 +1827,26 @@ def save(program, model_path, protocol=4, **configs):
     parameter_list = list(filter(is_parameter, program.list_vars()))
     param_dict = {p.name: get_tensor(p) for p in parameter_list}
 
-    param_dict = _unpack_saved_dict(param_dict, protocol)
+    param_dict = _unpack_saved_dict(param_dict, pickle_protocol)
 
-    # When value of dict is lager than 4GB ,there is a Bug on 'MAC python3'
-    if sys.platform == 'darwin' and sys.version_info.major == 3:
-        pickle_bytes = pickle.dumps(param_dict, protocol=protocol)
+    # When value of dict is lager than 4GB ,there is a Bug on 'MAC python3.5/6'
+    if sys.platform == 'darwin' and sys.version_info.major == 3 and (
+            sys.version_info.minor == 5 or sys.version_info.minor == 6):
+        pickle_bytes = pickle.dumps(param_dict, protocol=pickle_protocol)
         with open(model_path + ".pdparams", 'wb') as f:
             max_bytes = 2**30
             for i in range(0, len(pickle_bytes), max_bytes):
                 f.write(pickle_bytes[i:i + max_bytes])
     else:
         with open(model_path + ".pdparams", 'wb') as f:
-            pickle.dump(param_dict, f, protocol=protocol)
+            pickle.dump(param_dict, f, protocol=pickle_protocol)
 
     optimizer_var_list = list(
         filter(is_belong_to_optimizer, program.list_vars()))
 
     opt_dict = {p.name: get_tensor(p) for p in optimizer_var_list}
     with open(model_path + ".pdopt", 'wb') as f:
-        pickle.dump(opt_dict, f, protocol=protocol)
+        pickle.dump(opt_dict, f, protocol=pickle_protocol)
 
     main_program = program.clone()
     program.desc.flush()
@@ -1939,16 +1855,6 @@ def save(program, model_path, protocol=4, **configs):
 
     with open(model_path + ".pdmodel", "wb") as f:
         f.write(program.desc.serialize_to_string())
-
-
-def _pickle_loads_mac(path, f):
-    pickle_bytes = bytearray(0)
-    file_size = os.path.getsize(path)
-    max_bytes = 2**30
-    for _ in range(0, file_size, max_bytes):
-        pickle_bytes += f.read(max_bytes)
-    load_result = pickle.loads(pickle_bytes, encoding='latin1')
-    return load_result
 
 
 @static_only
@@ -1968,7 +1874,7 @@ def load(program, model_path, executor=None, var_list=None):
         model_path(str): The file prefix store the program
         executor(Executor, optional): The executor used for initialize the parameter
                                       When startup program is not run.
-        var_list(list|tuple, optional): The Tensor list/tuple to load single model file saved with
+        var_list(list, optional): The Tensor list to load single model file saved with
                                   [ save_params, save_persistables, save_vars ].
                                   Default: None
 
@@ -2096,14 +2002,6 @@ def load(program, model_path, executor=None, var_list=None):
             p = paddle.fluid.core.Place()
             p.set_place(t._place())
             place = paddle.fluid.XPUPlace(p.xpu_device_id())
-        elif p.is_npu_place():
-            p = paddle.fluid.core.Place()
-            p.set_place(t._place())
-            place = paddle.fluid.NPUPlace(p.npu_device_id())
-        elif p.is_mlu_place():
-            p = paddle.fluid.core.Place()
-            p.set_place(t._place())
-            place = paddle.fluid.MLUPlace(p.mlu_device_id())
         else:
             p = paddle.fluid.core.Place()
             p.set_place(t._place())
@@ -2118,12 +2016,8 @@ def load(program, model_path, executor=None, var_list=None):
                                                    global_scope(),
                                                    executor._default_executor)
     with open(parameter_file_name, 'rb') as f:
-
-        # When value of dict is lager than 4GB ,there is a Bug on 'MAC python3'
-        if sys.platform == 'darwin' and sys.version_info.major == 3:
-            load_dict = _pickle_loads_mac(parameter_file_name, f)
-        else:
-            load_dict = pickle.load(f, encoding='latin1')
+        load_dict = pickle.load(f) if six.PY2 else pickle.load(
+            f, encoding='latin1')
         load_dict = _pack_loaded_dict(load_dict)
     for v in parameter_list:
         assert v.name in load_dict, \
@@ -2144,7 +2038,8 @@ def load(program, model_path, executor=None, var_list=None):
                 optimizer_var_list, global_scope(), executor._default_executor)
 
         with open(opt_file_name, 'rb') as f:
-            load_dict = pickle.load(f, encoding='latin1')
+            load_dict = pickle.load(f) if six.PY2 else pickle.load(
+                f, encoding='latin1')
         for v in optimizer_var_list:
             assert v.name in load_dict, \
                 "Can not find [{}] in model file [{}]".format(
@@ -2160,7 +2055,7 @@ def load_program_state(model_path, var_list=None):
 
     Args:
         model_path(str): The file prefix store the program
-        var_list(list|tuple, optional): The Tensor list/tuple to load saved with
+        var_list(list, optional): The Tensor list to load saved with
                                   [ save_params, save_persistables, save_vars ].
                                   Default: None.
                                   The var_list is only used to get name,
@@ -2301,17 +2196,15 @@ def load_program_state(model_path, var_list=None):
         "Parameter file [{}] not exits".format(parameter_file_name)
 
     with open(parameter_file_name, 'rb') as f:
-        # When value of dict is lager than 4GB ,there is a Bug on 'MAC python3'
-        if sys.platform == 'darwin' and sys.version_info.major == 3:
-            para_dict = _pickle_loads_mac(parameter_file_name, f)
-        else:
-            para_dict = pickle.load(f, encoding='latin1')
+        para_dict = pickle.load(f) if six.PY2 else pickle.load(
+            f, encoding='latin1')
     para_dict = _pack_loaded_dict(para_dict)
 
     opt_file_name = model_prefix + ".pdopt"
     if os.path.exists(opt_file_name):
         with open(opt_file_name, 'rb') as f:
-            opti_dict = pickle.load(f, encoding='latin1')
+            opti_dict = pickle.load(f) if six.PY2 else pickle.load(
+                f, encoding='latin1')
 
         para_dict.update(opti_dict)
 
@@ -2394,14 +2287,6 @@ def set_program_state(program, state_dict):
                 p = paddle.fluid.core.Place()
                 p.set_place(ten_place)
                 py_place = paddle.fluid.XPUPlace(p.xpu_device_id())
-            elif ten_place.is_npu_place():
-                p = paddle.fluid.core.Place()
-                p.set_place(ten_place)
-                py_place = paddle.fluid.NPUPlace(p.npu_device_id())
-            elif ten_place.is_mlu_place():
-                p = paddle.fluid.core.Place()
-                p.set_place(ten_place)
-                py_place = paddle.fluid.MLUPlace(p.mlu_device_id())
 
             ten.set(new_para_np, py_place)
 

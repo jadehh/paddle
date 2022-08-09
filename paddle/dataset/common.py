@@ -25,9 +25,14 @@ import importlib
 import paddle.dataset
 import six.moves.cPickle as pickle
 import glob
-import paddle
 
-__all__ = []
+__all__ = [
+    'DATA_HOME',
+    'download',
+    'md5file',
+    'split',
+    'cluster_files_reader',
+]
 
 HOME = os.path.expanduser('~')
 DATA_HOME = os.path.join(HOME, '.cache', 'paddle', 'dataset')
@@ -96,17 +101,16 @@ def download(url, module_name, md5sum, save_name=None):
                     chunk_size = 4096
                     total_length = int(total_length)
                     total_iter = total_length / chunk_size + 1
-                    log_interval = total_iter // 20 if total_iter > 20 else 1
+                    log_interval = total_iter / 20 if total_iter > 20 else 1
                     log_index = 0
-                    bar = paddle.hapi.progressbar.ProgressBar(
-                        total_iter, name='item')
                     for data in r.iter_content(chunk_size=chunk_size):
+                        if six.PY2:
+                            data = six.b(data)
                         f.write(data)
                         log_index += 1
-                        bar.update(log_index, {})
                         if log_index % log_interval == 0:
-                            bar.update(log_index)
-
+                            sys.stderr.write(".")
+                        sys.stdout.flush()
         except Exception as e:
             # re-try
             continue

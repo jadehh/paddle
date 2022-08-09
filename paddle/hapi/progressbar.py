@@ -20,10 +20,9 @@ import os
 import sys
 import time
 import numpy as np
-import struct
 from collections import namedtuple
 
-__all__ = []
+__all__ = ['ProgressBar']
 
 
 class ProgressBar(object):
@@ -34,8 +33,7 @@ class ProgressBar(object):
                  width=30,
                  verbose=1,
                  start=True,
-                 file=sys.stdout,
-                 name='step'):
+                 file=sys.stdout):
         self._num = num
         if isinstance(num, int) and num <= 0:
             raise TypeError('num should be None or integer (> 0)')
@@ -49,7 +47,6 @@ class ProgressBar(object):
         if start:
             self._start = time.time()
         self._last_update = 0
-        self.name = name
 
         self._dynamic_display = (
             (hasattr(self.file, 'isatty') and
@@ -77,22 +74,8 @@ class ProgressBar(object):
         self.file.flush()
         self._start = time.time()
 
-    def update(self, current_num, values={}):
+    def update(self, current_num, values=None):
         now = time.time()
-
-        def convert_uint16_to_float(in_list):
-            in_list = np.asarray(in_list)
-            out = np.vectorize(
-                lambda x: struct.unpack('<f', struct.pack('<I', x << 16))[0],
-                otypes=[np.float32])(in_list.flat)
-            return np.reshape(out, in_list.shape)
-
-        for i, (k, val) in enumerate(values):
-            if k == "loss":
-                val = val if isinstance(val, list) or isinstance(
-                    val, np.ndarray) else [val]
-                if isinstance(val[0], np.uint16):
-                    values[i] = ("loss", list(convert_uint16_to_float(val)))
 
         if current_num:
             time_per_unit = (now - self._start) / current_num
@@ -100,11 +83,11 @@ class ProgressBar(object):
             time_per_unit = 0
 
         if time_per_unit >= 1 or time_per_unit == 0:
-            fps = ' - %.0fs/%s' % (time_per_unit, self.name)
+            fps = ' - %.0fs/%s' % (time_per_unit, 'step')
         elif time_per_unit >= 1e-3:
-            fps = ' - %.0fms/%s' % (time_per_unit * 1e3, self.name)
+            fps = ' - %.0fms/%s' % (time_per_unit * 1e3, 'step')
         else:
-            fps = ' - %.0fus/%s' % (time_per_unit * 1e6, self.name)
+            fps = ' - %.0fus/%s' % (time_per_unit * 1e6, 'step')
 
         info = ''
         if self._verbose == 1:
@@ -119,7 +102,7 @@ class ProgressBar(object):
             if self._num is not None:
                 numdigits = int(np.log10(self._num)) + 1
 
-                bar_chars = (self.name + ' %' + str(numdigits) + 'd/%d [') % (
+                bar_chars = ('step %' + str(numdigits) + 'd/%d [') % (
                     current_num, self._num)
                 prog = float(current_num) / self._num
                 prog_width = int(self._width * prog)
@@ -133,7 +116,7 @@ class ProgressBar(object):
                 bar_chars += ('.' * (self._width - prog_width))
                 bar_chars += ']'
             else:
-                bar_chars = self.name + ' %3d' % current_num
+                bar_chars = 'step %3d' % current_num
 
             self._total_width = len(bar_chars)
             sys.stdout.write(bar_chars)
@@ -179,10 +162,10 @@ class ProgressBar(object):
         elif self._verbose == 2 or self._verbose == 3:
             if self._num:
                 numdigits = int(np.log10(self._num)) + 1
-                count = (self.name + ' %' + str(numdigits) + 'd/%d') % (
-                    current_num, self._num)
+                count = ('step %' + str(numdigits) + 'd/%d') % (current_num,
+                                                                self._num)
             else:
-                count = self.name + ' %3d' % current_num
+                count = 'step %3d' % current_num
             info = count + info
 
             for k, val in values:

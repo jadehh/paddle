@@ -24,7 +24,7 @@ import paddle
 from paddle.io import Dataset
 from paddle.dataset.common import _check_exists_and_download
 
-__all__ = []
+__all__ = ['Cifar10', 'Cifar100']
 
 URL_PREFIX = 'https://dataset.bj.bcebos.com/cifar/'
 CIFAR10_URL = URL_PREFIX + 'cifar-10-python.tar.gz'
@@ -79,6 +79,7 @@ class Cifar10(Dataset):
                     image = paddle.reshape(image, (1, -1))
                     return self.fc(image), label
 
+            paddle.disable_static()
 
             normalize = Normalize(mean=[0.5, 0.5, 0.5],
                                   std=[0.5, 0.5, 0.5],
@@ -140,10 +141,11 @@ class Cifar10(Dataset):
             names = (each_item.name for each_item in f
                      if self.flag in each_item.name)
 
-            names = sorted(list(names))
-
             for name in names:
-                batch = pickle.load(f.extractfile(name), encoding='bytes')
+                if six.PY2:
+                    batch = pickle.load(f.extractfile(name))
+                else:
+                    batch = pickle.load(f.extractfile(name), encoding='bytes')
 
                 data = batch[six.b('data')]
                 labels = batch.get(
@@ -210,6 +212,7 @@ class Cifar100(Cifar10):
                     image = paddle.reshape(image, (1, -1))
                     return self.fc(image), label
 
+            paddle.disable_static()
 
             normalize = Normalize(mean=[0.5, 0.5, 0.5],
                                   std=[0.5, 0.5, 0.5],

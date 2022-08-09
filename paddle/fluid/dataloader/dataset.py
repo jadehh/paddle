@@ -14,8 +14,8 @@
 
 from __future__ import print_function
 
-import paddle
 from .. import framework
+import paddle.dataset.common
 
 __all__ = [
     "Dataset", "IterableDataset", "TensorDataset", "ComposeDataset",
@@ -97,10 +97,10 @@ class IterableDataset(Dataset):
         .. code-block:: python
 
             import numpy as np
-            from paddle.io import IterableDataset
+            from paddle.io import Dataset
             
             # define a random dataset
-            class RandomDataset(IterableDataset):
+            class RandomDataset(Dataset):
                 def __init__(self, num_samples):
                     self.num_samples = num_samples
             
@@ -126,8 +126,8 @@ class IterableDataset(Dataset):
         .. code-block:: python
 
             import math
-            import paddle
             import numpy as np
+            import paddle.fluid as fluid
             from paddle.io import IterableDataset, DataLoader, get_worker_info
 
             class SplitedIterableDataset(IterableDataset):
@@ -151,15 +151,17 @@ class IterableDataset(Dataset):
                     for i in range(iter_start, iter_end):
                         yield np.array([i])
 
-            dataset = SplitedIterableDataset(start=2, end=9)
-            dataloader = DataLoader(
-                dataset,
-                num_workers=2,
-                batch_size=1,
-                drop_last=True)
+            place = fluid.CPUPlace()
+            with fluid.dygraph.guard(place):
+                dataset = SplitedIterableDataset(start=2, end=9)
+                dataloader = DataLoader(
+                    dataset,
+                    places=place,
+                    num_workers=2,
+                    batch_size=1,
+                    drop_last=True)
 
-            for data in dataloader:
-                print(data)
+                print(list(dataloader))
                 # outputs: [2, 5, 3, 6, 4, 7]
 
     Example 2: splitting data copy in each worker by :code:`worker_init_fn`
@@ -167,8 +169,8 @@ class IterableDataset(Dataset):
         .. code-block:: python
 
             import math
-            import paddle
             import numpy as np
+            import paddle.fluid as fluid
             from paddle.io import IterableDataset, DataLoader, get_worker_info
 
             class RangeIterableDataset(IterableDataset):
@@ -180,31 +182,33 @@ class IterableDataset(Dataset):
                     for i in range(self.start, self.end):
                         yield np.array([i])
 
-            dataset = RangeIterableDataset(start=2, end=9)
+            place = fluid.CPUPlace()
+            with fluid.dygraph.guard(place):
+                dataset = RangeIterableDataset(start=2, end=9)
 
-            def worker_init_fn(worker_id):
-                worker_info = get_worker_info()
+                def worker_init_fn(worker_id):
+                    worker_info = get_worker_info()
 
-                dataset = worker_info.dataset
-                start = dataset.start
-                end = dataset.end
-                num_per_worker = int(
-                    math.ceil((end - start) / float(worker_info.num_workers)))
+                    dataset = worker_info.dataset
+                    start = dataset.start
+                    end = dataset.end
+                    num_per_worker = int(
+                        math.ceil((end - start) / float(worker_info.num_workers)))
 
-                worker_id = worker_info.id
-                dataset.start = start + worker_id * num_per_worker
-                dataset.end = min(dataset.start + num_per_worker, end)
+                    worker_id = worker_info.id
+                    dataset.start = start + worker_id * num_per_worker
+                    dataset.end = min(dataset.start + num_per_worker, end)
 
-            dataloader = DataLoader(
-                dataset,
-                num_workers=2,
-                batch_size=1,
-                drop_last=True,
-                worker_init_fn=worker_init_fn)
+                dataloader = DataLoader(
+                    dataset,
+                    places=place,
+                    num_workers=2,
+                    batch_size=1,
+                    drop_last=True,
+                    worker_init_fn=worker_init_fn)
 
-            for data in dataloader:
-                print(data) 
-            # outputs: [2, 5, 3, 6, 4, 7]
+                print(list(dataloader))
+                # outputs: [2, 5, 3, 6, 4, 7]
 
     """
 
@@ -233,7 +237,7 @@ class TensorDataset(Dataset):
     each sample by indexing tensors in the 1st dimension.
 
     Args:
-        tensors(list|tuple): A list/tuple of tensors with same shape in the 1st dimension.
+        tensors(list of Tensor): tensors with same shape in the 1st dimension.
 
     Returns:
         Dataset: a Dataset instance wrapping tensors.
@@ -246,6 +250,7 @@ class TensorDataset(Dataset):
             import paddle
             from paddle.io import TensorDataset
 
+            paddle.disable_static()
 
             input_np = np.random.random([2, 3, 4]).astype('float32')
             input = paddle.to_tensor(input_np)
@@ -261,7 +266,7 @@ class TensorDataset(Dataset):
     """
 
     def __init__(self, tensors):
-        if not framework._non_static_mode():
+        if not framework.in_dygraph_mode():
             raise RuntimeError(
                 "TensorDataset con only be used in imperative mode")
         assert all([tensor.shape[0] == tensors[0].shape[0] for tensor in tensors]), \

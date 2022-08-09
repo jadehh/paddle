@@ -14,8 +14,6 @@
 
 from paddle.fluid.optimizer import Optimizer
 
-__all__ = []
-
 
 class MetaOptimizerBase(Optimizer):
     def __init__(self, optimizer):

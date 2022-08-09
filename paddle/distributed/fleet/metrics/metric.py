@@ -18,8 +18,6 @@ import numpy as np
 from paddle.static import Variable
 import paddle
 
-__all__ = []
-
 
 def sum(input, scope=None, util=None):
     """

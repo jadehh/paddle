@@ -150,7 +150,6 @@ def _format_summary(collected_ops_list):
     '''
     _verify_dependent_package()
 
-    from prettytable import PrettyTable
     summary_table = PrettyTable(
         ["No.", "TYPE", "INPUT", "OUTPUT", "PARAMs", "FLOPs"])
     summary_table.align = 'r'

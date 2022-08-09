@@ -25,7 +25,10 @@ from paddle.utils import try_import
 
 from .progressbar import ProgressBar
 
-__all__ = []
+__all__ = [
+    'Callback', 'ProgBarLogger', 'ModelCheckpoint', 'VisualDL', 'LRScheduler',
+    'EarlyStopping', 'ReduceLROnPlateau'
+]
 
 
 def config_callbacks(callbacks=None,
@@ -126,8 +129,7 @@ class CallbackList(object):
 
 class Callback(object):
     """
-    Base class used to build new callbacks. And new callbacks could also
-    terminate training by setting `model.stop_training=True`.
+    Base class used to build new callbacks.
 
     Examples:
 
@@ -325,7 +327,7 @@ class ProgBarLogger(Callback):
             ])
             train_dataset = MNIST(mode='train', transform=transform)
 
-            lenet = paddle.vision.models.LeNet()
+            lenet = paddle.vision.LeNet()
             model = paddle.Model(lenet,
                 inputs, labels)
 
@@ -362,7 +364,7 @@ class ProgBarLogger(Callback):
         }
         if self._is_print():
             print(
-                "The loss value printed in the log is the current step, and the metric is the average value of previous steps."
+                "The loss value printed in the log is the current step, and the metric is the average value of previous step."
             )
 
     def on_epoch_begin(self, epoch=None, logs=None):
@@ -396,10 +398,6 @@ class ProgBarLogger(Callback):
             values.append(
                 ('ips', "%.5f samples/sec" %
                  (samples / (timer['data_time'] + timer['batch_time']))))
-            timer['count'] = 0
-            timer['samples'] = 0
-            timer['data_time'] = 0.
-            timer['batch_time'] = 0.
 
         progbar.update(steps, values)
 
@@ -445,6 +443,9 @@ class ProgBarLogger(Callback):
             num=self.eval_steps, verbose=self.verbose)
         if self._is_print():
             print('Eval begin...')
+            print(
+                "The loss value printed in the log is the current batch, and the metric is the average value of previous step."
+            )
 
         self._eval_timer['batch_start_time'] = time.time()
 
@@ -559,7 +560,7 @@ class ModelCheckpoint(Callback):
             ])
             train_dataset = MNIST(mode='train', transform=transform)
 
-            lenet = paddle.vision.models.LeNet()
+            lenet = paddle.vision.LeNet()
             model = paddle.Model(lenet,
                 inputs, labels)
 
@@ -597,11 +598,10 @@ class ModelCheckpoint(Callback):
 
 class LRScheduler(Callback):
     """Lr scheduler callback function
-    
     Args:
-        by_step(bool, optional): whether to update learning rate scheduler
+        by_step(bool, optional): whether to update learning rate scheduler 
             by step. Default: True.
-        by_epoch(bool, optional): whether to update learning rate scheduler
+        by_epoch(bool, optional): whether to update learning rate scheduler 
             by epoch. Default: False.
 
     Examples:
@@ -620,7 +620,7 @@ class LRScheduler(Callback):
             ])
             train_dataset = paddle.vision.datasets.MNIST(mode='train', transform=transform)
 
-            lenet = paddle.vision.models.LeNet()
+            lenet = paddle.vision.LeNet()
             model = paddle.Model(lenet,
                 inputs, labels)
 
@@ -636,7 +636,7 @@ class LRScheduler(Callback):
                     boundaries=boundaries, values=values)
                 learning_rate = paddle.optimizer.lr.LinearWarmup(
                     learning_rate=learning_rate,
-                    warmup_steps=wamup_steps,
+                    warmup_steps=wamup_epochs,
                     start_lr=base_lr / 5.,
                     end_lr=base_lr,
                     verbose=True)
@@ -687,9 +687,7 @@ class LRScheduler(Callback):
 
 
 class EarlyStopping(Callback):
-    """Stop training when the given monitor stopped improving during evaluation
-    by setting `model.stop_training=True`.
-    
+    """Stop training when the given monitor stopped improving during evaluation.
     Args:
         monitor(str): Quantity to be monitored. Default: 'loss'.
         mode(str|None): Mode should be one of 'auto', 'min' or 'max'. In 'min'
@@ -864,7 +862,7 @@ class VisualDL(Callback):
             train_dataset = paddle.vision.datasets.MNIST(mode='train', transform=transform)
             eval_dataset = paddle.vision.datasets.MNIST(mode='test', transform=transform)
 
-            net = paddle.vision.models.LeNet()
+            net = paddle.vision.LeNet()
             model = paddle.Model(net, inputs, labels)
 
             optim = paddle.optimizer.Adam(0.001, parameters=net.parameters())

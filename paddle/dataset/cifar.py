@@ -37,7 +37,7 @@ import tarfile
 import six
 from six.moves import cPickle as pickle
 
-__all__ = []
+__all__ = ['train100', 'test100', 'train10', 'test10']
 
 URL_PREFIX = 'https://dataset.bj.bcebos.com/cifar/'
 CIFAR10_URL = URL_PREFIX + 'cifar-10-python.tar.gz'
@@ -62,7 +62,11 @@ def reader_creator(filename, sub_name, cycle=False):
                          if sub_name in each_item.name)
 
                 for name in names:
-                    batch = pickle.load(f.extractfile(name), encoding='bytes')
+                    if six.PY2:
+                        batch = pickle.load(f.extractfile(name))
+                    else:
+                        batch = pickle.load(
+                            f.extractfile(name), encoding='bytes')
                     for item in read_batch(batch):
                         yield item
 
@@ -75,7 +79,6 @@ def reader_creator(filename, sub_name, cycle=False):
 @deprecated(
     since="2.0.0",
     update_to="paddle.vision.datasets.Cifar100",
-    level=1,
     reason="Please use new dataset API which supports paddle.io.DataLoader")
 def train100():
     """
@@ -95,7 +98,6 @@ def train100():
 @deprecated(
     since="2.0.0",
     update_to="paddle.vision.datasets.Cifar100",
-    level=1,
     reason="Please use new dataset API which supports paddle.io.DataLoader")
 def test100():
     """
@@ -115,7 +117,6 @@ def test100():
 @deprecated(
     since="2.0.0",
     update_to="paddle.vision.datasets.Cifar10",
-    level=1,
     reason="Please use new dataset API which supports paddle.io.DataLoader")
 def train10(cycle=False):
     """
@@ -138,7 +139,6 @@ def train10(cycle=False):
 @deprecated(
     since="2.0.0",
     update_to="paddle.vision.datasets.Cifar10",
-    level=1,
     reason="Please use new dataset API which supports paddle.io.DataLoader")
 def test10(cycle=False):
     """
@@ -161,7 +161,6 @@ def test10(cycle=False):
 @deprecated(
     since="2.0.0",
     update_to="paddle.vision.datasets.Cifar10",
-    level=1,
     reason="Please use new dataset API which supports paddle.io.DataLoader")
 def fetch():
     paddle.dataset.common.download(CIFAR10_URL, 'cifar', CIFAR10_MD5)

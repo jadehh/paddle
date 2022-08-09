@@ -30,7 +30,7 @@ import paddle.compat as cpt
 import paddle.utils.deprecated as deprecated
 from six.moves import zip, range
 
-__all__ = []
+__all__ = ['test, get_dict', 'get_embedding']
 
 DATA_URL = 'http://paddlemodels.bj.bcebos.com/conll05st/conll05st-tests.tar.gz'
 DATA_MD5 = '387719152ae52d60422c016e92a742fc'
@@ -206,7 +206,6 @@ def reader_creator(corpus_reader,
 @deprecated(
     since="2.0.0",
     update_to="paddle.text.datasets.Conll05st",
-    level=1,
     reason="Please use new dataset API which supports paddle.io.DataLoader")
 def get_dict():
     """
@@ -224,7 +223,6 @@ def get_dict():
 @deprecated(
     since="2.0.0",
     update_to="paddle.text.datasets.Conll05st",
-    level=1,
     reason="Please use new dataset API which supports paddle.io.DataLoader")
 def get_embedding():
     """
@@ -236,7 +234,6 @@ def get_embedding():
 @deprecated(
     since="2.0.0",
     update_to="paddle.text.datasets.Conll05st",
-    level=1,
     reason="Please use new dataset API which supports paddle.io.DataLoader")
 def test():
     """
@@ -261,7 +258,6 @@ def test():
 @deprecated(
     since="2.0.0",
     update_to="paddle.text.datasets.Conll05st",
-    level=1,
     reason="Please use new dataset API which supports paddle.io.DataLoader")
 def fetch():
     paddle.dataset.common.download(WORDDICT_URL, 'conll05st', WORDDICT_MD5)

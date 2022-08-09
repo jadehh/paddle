@@ -22,8 +22,6 @@ import logging
 
 from paddle.fluid.dygraph.parallel import ParallelEnv
 
-__all__ = []
-
 
 def setup_logger(output=None, name="hapi", log_level=logging.INFO):
     """

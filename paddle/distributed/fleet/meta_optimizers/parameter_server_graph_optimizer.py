@@ -15,8 +15,6 @@ from paddle import fluid
 from paddle.fluid import compiler
 from .parameter_server_optimizer import ParameterServerOptimizer
 
-__all__ = []
-
 
 class ParameterServerGraphOptimizer(ParameterServerOptimizer):
     def __init__(self, optimizer):

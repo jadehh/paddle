@@ -32,7 +32,7 @@ OpRole = core.op_proto_and_checker_maker.OpRole
 __all__ = ["FleetUtil"]
 
 _logger = get_logger(
-    __name__, logging.INFO, fmt='%(asctime)s %(levelname)s: %(message)s')
+    __name__, logging.INFO, fmt='%(asctime)s-%(levelname)s: %(message)s')
 
 fleet = None
 
@@ -244,7 +244,7 @@ class FleetUtil(object):
         new_pos = 0.0
         new_neg = 0.0
         total_ins_num = 0
-        for i in range(num_bucket):
+        for i in xrange(num_bucket):
             index = num_bucket - 1 - i
             new_pos = pos + global_pos[0][index]
             total_ins_num += global_pos[0][index]
@@ -435,7 +435,11 @@ class FleetUtil(object):
                         f.write(pre_content + "\n")
                         f.write(content + "\n")
                     client.delete(donefile_path)
-                    client.upload(donefile_name, output_path)
+                    client.upload(
+                        output_path,
+                        donefile_name,
+                        multi_processes=1,
+                        overwrite=False)
                     self.rank0_error("write %s/%s %s succeed" % \
                                       (day, pass_id, donefile_name))
                 else:
@@ -444,7 +448,11 @@ class FleetUtil(object):
             else:
                 with open(donefile_name, "w") as f:
                     f.write(content + "\n")
-                client.upload(donefile_name, output_path)
+                client.upload(
+                    output_path,
+                    donefile_name,
+                    multi_processes=1,
+                    overwrite=False)
                 self.rank0_error("write %s/%s %s succeed" % \
                                (day, pass_id, donefile_name))
         fleet._role_maker._barrier_worker()
@@ -539,7 +547,11 @@ class FleetUtil(object):
                         f.write(pre_content + "\n")
                         f.write(xbox_str + "\n")
                     client.delete(donefile_path)
-                    client.upload(donefile_name, output_path)
+                    client.upload(
+                        output_path,
+                        donefile_name,
+                        multi_processes=1,
+                        overwrite=False)
                     self.rank0_error("write %s/%s %s succeed" % \
                                       (day, pass_id, donefile_name))
                 else:
@@ -548,7 +560,11 @@ class FleetUtil(object):
             else:
                 with open(donefile_name, "w") as f:
                     f.write(xbox_str + "\n")
-                client.upload(donefile_name, output_path)
+                client.upload(
+                    output_path,
+                    donefile_name,
+                    multi_processes=1,
+                    overwrite=False)
                 self.rank0_error("write %s/%s %s succeed" % \
                                (day, pass_id, donefile_name))
         fleet._role_maker._barrier_worker()
@@ -622,7 +638,11 @@ class FleetUtil(object):
                            % (file_num, key_num)
                 with open(donefile_name, "w") as f:
                     f.write(meta_str)
-                client.upload(donefile_name, model_path)
+                client.upload(
+                    model_path,
+                    donefile_name,
+                    multi_processes=1,
+                    overwrite=False)
                 self.rank0_error("write %s succeed" % donefile_path)
         fleet._role_maker._barrier_worker()
 
@@ -942,7 +962,7 @@ class FleetUtil(object):
             if not client.is_exist(dest):
                 client.makedirs(dest)
 
-            client.upload(model_name, dest, multi_processes=5, overwrite=True)
+            client.upload(dest, model_name)
 
         fleet._role_maker._barrier_worker()
 
@@ -1039,8 +1059,12 @@ class FleetUtil(object):
                 dest = "%s/%s/delta-%s/dnn_plugin/" % (output_path, day,
                                                        pass_id)
             if not client.is_exist(dest):
-                client.mkdirs(dest)
-            client.upload(model_name, dest, multi_processes=5, overwrite=True)
+                client.makedirs(dest)
+
+            if os.path.isdir(model_name):
+                client.upload_dir(dest, model_name)
+            else:
+                client.upload(dest, model_name)
 
         fleet._role_maker._barrier_worker()
 
@@ -1216,15 +1240,15 @@ class FleetUtil(object):
         hours = os.popen("echo -n " + hours).read().split(" ")
         split_interval = int(split_interval)
         split_per_pass = int(split_per_pass)
-        splits_per_day = 24 * 60 // split_interval
-        pass_per_day = splits_per_day // split_per_pass
+        splits_per_day = 24 * 60 / split_interval
+        pass_per_day = splits_per_day / split_per_pass
         left_train_hour = int(hours[0])
         right_train_hour = int(hours[-1])
 
         start = 0
         split_path = []
         for i in range(splits_per_day):
-            h = start // 60
+            h = start / 60
             m = start % 60
             if h < left_train_hour or h > right_train_hour:
                 start += split_interval
@@ -1401,7 +1425,7 @@ class FleetUtil(object):
         relative_ctr_error = 0.0
         k_max_span = 0.01
         k_relative_error_bound = 0.05
-        for i in range(num_bucket):
+        for i in xrange(num_bucket):
             click = global_pos[0][i]
             show = global_pos[0][i] + global_neg[0][i]
             ctr = float(i) / num_bucket

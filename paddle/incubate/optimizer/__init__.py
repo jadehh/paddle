@@ -12,9 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .lookahead import LookAhead  # noqa: F401
-from .modelaverage import ModelAverage  # noqa: F401
-from .distributed_fused_lamb import DistributedFusedLamb  # noqa: F401
-from . import functional  # noqa: F401
+from .lookahead import LookAhead
+from .modelaverage import ModelAverage
 
-__all__ = []
+__all__ = ['LookAhead', 'ModelAverage']

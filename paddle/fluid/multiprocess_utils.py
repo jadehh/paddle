@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import six
 import sys
 import signal
 import atexit
@@ -19,11 +20,10 @@ import atexit
 from . import core
 
 # NOTE: queue has a different name in python2 and python3
-import queue
-
-# multi-process worker check indices queue interval, avoid
-# hanging in subprocess data loading
-MP_STATUS_CHECK_INTERVAL = 5.
+if six.PY2:
+    import Queue as queue
+else:
+    import queue
 
 # NOTE: [ mmap files clear ] If there is still data in the multiprocess queue when the main process finishes reading,
 # the data in the queue needs to be popped. Then the LoDTensor read by the main process

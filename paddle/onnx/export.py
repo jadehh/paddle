@@ -15,7 +15,7 @@
 import os
 from paddle.utils import try_import
 
-__all__ = []
+__all__ = ['export']
 
 
 def export(layer, path, input_spec=None, opset_version=9, **configs):

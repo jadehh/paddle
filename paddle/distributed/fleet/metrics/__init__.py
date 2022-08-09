@@ -12,13 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .metric import acc  # noqa: F401
-from .metric import auc  # noqa: F401
-from .metric import mae  # noqa: F401
-from .metric import max  # noqa: F401
-from .metric import min  # noqa: F401
-from .metric import mse  # noqa: F401
-from .metric import rmse  # noqa: F401
-from .metric import sum  # noqa: F401
+from .metric import *
 
-__all__ = []
+__all__ = [
+    "sum",
+    "max",
+    "min",
+    "auc",
+    "mae",
+    "rmse",
+    "mse",
+    "acc",
+]

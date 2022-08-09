@@ -14,17 +14,15 @@
 
 # TODO: define the extention functions
 
+__all__ = ['diag_embed']
+
 import numpy as np
 from ...fluid.data_feeder import check_dtype
 from ...fluid.layer_helper import LayerHelper
-from ...static import Variable
-from ...tensor.creation import assign
-from ...fluid import dygraph_utils
+from ...fluid.framework import Variable, in_dygraph_mode
+from ...fluid.layers.tensor import assign
+from ...fluid import core, dygraph_utils
 from ...fluid.layers.layer_function_generator import templatedoc
-from ...fluid.layers.sequence_lod import sequence_mask  #noqa: F401
-from paddle import in_dynamic_mode
-
-__all__ = []
 
 
 def diag_embed(input, offset=0, dim1=-2, dim2=-1):
@@ -125,7 +123,7 @@ def diag_embed(input, offset=0, dim1=-2, dim2=-1):
                "dim1 and dim2 cannot be the same dimension." \
                 "But received dim1 = %d, dim2 = %d\n"%(dim1, dim2)
 
-    if not in_dynamic_mode():
+    if not in_dygraph_mode():
         __check_input(input, offset, dim1, dim2)
     helper = LayerHelper("diag_embed", **locals())
 

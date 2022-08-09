@@ -29,7 +29,7 @@ import os
 import paddle.dataset.common
 import paddle.utils.deprecated as deprecated
 
-__all__ = []
+__all__ = ['train', 'test']
 
 URL = 'http://paddlemodels.bj.bcebos.com/uci_housing/housing.data'
 MD5 = 'd4accdce7a25600298819f8e28e8d593'
@@ -87,7 +87,6 @@ def load_data(filename, feature_num=14, ratio=0.8):
 @deprecated(
     since="2.0.0",
     update_to="paddle.text.datasets.UCIHousing",
-    level=1,
     reason="Please use new dataset API which supports paddle.io.DataLoader")
 def train():
     """
@@ -112,7 +111,6 @@ def train():
 @deprecated(
     since="2.0.0",
     update_to="paddle.text.datasets.UCIHousing",
-    level=1,
     reason="Please use new dataset API which supports paddle.io.DataLoader")
 def test():
     """
@@ -148,7 +146,6 @@ def fluid_model():
 @deprecated(
     since="2.0.0",
     update_to="paddle.text.datasets.UCIHousing",
-    level=1,
     reason="Please use new dataset API which supports paddle.io.DataLoader")
 def predict_reader():
     """
@@ -165,7 +162,6 @@ def predict_reader():
 @deprecated(
     since="2.0.0",
     update_to="paddle.text.datasets.UCIHousing",
-    level=1,
     reason="Please use new dataset API which supports paddle.io.DataLoader")
 def fetch():
     paddle.dataset.common.download(URL, 'uci_housing', MD5)

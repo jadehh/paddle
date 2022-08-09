@@ -15,10 +15,21 @@
 import six
 import math
 
-__all__ = []
+__all__ = [
+    'long_type',
+    'to_text',
+    'to_bytes',
+    'round',
+    'floor_division',
+    'get_exception_message',
+]
 
-int_type = int
-long_type = int
+if six.PY2:
+    int_type = int
+    long_type = long
+else:
+    int_type = int
+    long_type = int
 
 
 #  str and bytes related functions
@@ -258,4 +269,7 @@ def get_exception_message(exc):
     """
     assert exc is not None
 
-    return str(exc)
+    if six.PY2:
+        return exc.message
+    else:
+        return str(exc)

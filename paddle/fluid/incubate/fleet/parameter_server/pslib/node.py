@@ -13,8 +13,6 @@
 """Defination of Server and Worker."""
 
 from . import ps_pb2 as pslib
-# NOTE: reduce removed in fuctools in python3
-from functools import reduce
 
 
 class Server(object):
@@ -125,7 +123,7 @@ class DownpourServer(Server):
             support_accessor_class = [
                 'DownpourFeatureValueAccessor', 'DownpourCtrAccessor',
                 'DownpourSparseValueAccessor', 'DownpourCtrDoubleAccessor',
-                'DownpourUnitAccessor', 'DownpourDoubleUnitAccessor'
+                'DownpourUnitAccessor'
             ]
             if strategy.get('sparse_accessor_class') is not None:
                 accessor_class = strategy.get('sparse_accessor_class')
@@ -256,7 +254,7 @@ class DownpourServer(Server):
                 table2.param = 2
                 table2.converter = converter
                 table2.deconverter = deconverter
-            elif accessor_class == 'DownpourUnitAccessor' or accessor_class == 'DownpourDoubleUnitAccessor':
+            elif accessor_class == 'DownpourUnitAccessor':
                 self.add_sparse_table_common_config(table, strategy)
                 self.add_sparse_optimizer(table.accessor.embed_sgd_param,
                                           strategy, "embed_")
@@ -382,7 +380,7 @@ class DownpourServer(Server):
         table.accessor.fea_dim = fea_dim
 
     def add_sparse_optimizer(self, sgd, strategy, prefix):
-        optimizer_name = strategy.get(prefix + "sparse_optimizer", "adagrad")
+        optimizer_name = strategy.get(prefix + "sparse_optimizer", "adam")
         sgd.name = optimizer_name
         if optimizer_name == "naive":
             sgd.naive.learning_rate = \
@@ -396,19 +394,6 @@ class DownpourServer(Server):
                 strategy.get(prefix + 'sparse_learning_rate', 0.05)
             sgd.adagrad.initial_range = \
                 strategy.get(prefix + 'sparse_initial_range', 1e-4)
-            if prefix == "embed_":
-                sgd.adagrad.initial_range = 0
-            sgd.adagrad.initial_g2sum = strategy.get(
-                prefix + 'sparse_initial_g2sum', 3)
-            bounds = strategy.get(prefix + 'sparse_weight_bounds', [-10, 10])
-            sgd.adagrad.weight_bounds.extend(bounds)
-        elif optimizer_name == "std_adagrad":
-            sgd.adagrad.learning_rate = \
-                strategy.get(prefix + 'sparse_learning_rate', 0.05)
-            sgd.adagrad.initial_range = \
-                strategy.get(prefix + 'sparse_initial_range', 1e-4)
-            if prefix == "embed_":
-                sgd.adagrad.initial_range = 0
             sgd.adagrad.initial_g2sum = strategy.get(
                 prefix + 'sparse_initial_g2sum', 3)
             bounds = strategy.get(prefix + 'sparse_weight_bounds', [-10, 10])

@@ -17,13 +17,12 @@ from __future__ import print_function
 import tarfile
 import numpy as np
 import gzip
-import six
 
 from paddle.io import Dataset
 import paddle.compat as cpt
 from paddle.dataset.common import _check_exists_and_download
 
-__all__ = []
+__all__ = ['WMT14']
 
 URL_DEV_TEST = ('http://www-lium.univ-lemans.fr/~schwenk/'
                 'cslm_joint_paper/data/dev+test.tgz')
@@ -55,10 +54,8 @@ class WMT14(Dataset):
             :attr:`data_file` is not set. Default True
 
     Returns:
-        Dataset: Instance of WMT14 dataset
-            - src_ids (np.array) - The sequence of token ids of source language.
-            - trg_ids (np.array) - The sequence of token ids of target language.
-            - trg_ids_next (np.array) - The next sequence of token ids of target language.
+        Dataset: instance of WMT14 dataset
+
     Examples:
 
         .. code-block:: python
