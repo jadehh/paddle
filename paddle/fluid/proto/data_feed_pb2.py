@@ -19,7 +19,7 @@ DESCRIPTOR = _descriptor.FileDescriptor(
   name='data_feed.proto',
   package='paddle.framework',
   syntax='proto2',
-  serialized_pb=_b('\n\x0f\x64\x61ta_feed.proto\x12\x10paddle.framework\"b\n\x04Slot\x12\x0c\n\x04name\x18\x01 \x02(\t\x12\x0c\n\x04type\x18\x02 \x02(\t\x12\x17\n\x08is_dense\x18\x03 \x01(\x08:\x05\x66\x61lse\x12\x16\n\x07is_used\x18\x04 \x01(\x08:\x05\x66\x61lse\x12\r\n\x05shape\x18\x05 \x03(\x05\"6\n\rMultiSlotDesc\x12%\n\x05slots\x18\x01 \x03(\x0b\x32\x16.paddle.framework.Slot\"\xdf\x01\n\x0c\x44\x61taFeedDesc\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x16\n\nbatch_size\x18\x02 \x01(\x05:\x02\x33\x32\x12\x38\n\x0fmulti_slot_desc\x18\x03 \x01(\x0b\x32\x1f.paddle.framework.MultiSlotDesc\x12\x14\n\x0cpipe_command\x18\x04 \x01(\t\x12\x12\n\nthread_num\x18\x05 \x01(\x05\x12\x13\n\x0brank_offset\x18\x06 \x01(\t\x12\x19\n\rpv_batch_size\x18\x07 \x01(\x05:\x02\x33\x32\x12\x15\n\ninput_type\x18\x08 \x01(\x05:\x01\x30')
+  serialized_pb=_b('\n\x0f\x64\x61ta_feed.proto\x12\x10paddle.framework\"b\n\x04Slot\x12\x0c\n\x04name\x18\x01 \x02(\t\x12\x0c\n\x04type\x18\x02 \x02(\t\x12\x17\n\x08is_dense\x18\x03 \x01(\x08:\x05\x66\x61lse\x12\x16\n\x07is_used\x18\x04 \x01(\x08:\x05\x66\x61lse\x12\r\n\x05shape\x18\x05 \x03(\x05\"H\n\rMultiSlotDesc\x12%\n\x05slots\x18\x01 \x03(\x0b\x32\x16.paddle.framework.Slot\x12\x10\n\x08uid_slot\x18\x02 \x01(\t\"\xf7\x01\n\x0c\x44\x61taFeedDesc\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x16\n\nbatch_size\x18\x02 \x01(\x05:\x02\x33\x32\x12\x38\n\x0fmulti_slot_desc\x18\x03 \x01(\x0b\x32\x1f.paddle.framework.MultiSlotDesc\x12\x14\n\x0cpipe_command\x18\x04 \x01(\t\x12\x12\n\nthread_num\x18\x05 \x01(\x05\x12\x13\n\x0brank_offset\x18\x06 \x01(\t\x12\x19\n\rpv_batch_size\x18\x07 \x01(\x05:\x02\x33\x32\x12\x15\n\ninput_type\x18\x08 \x01(\x05:\x01\x30\x12\x16\n\x0eso_parser_name\x18\t \x01(\t')
 )
 _sym_db.RegisterFileDescriptor(DESCRIPTOR)
 
@@ -99,6 +99,13 @@ _MULTISLOTDESC = _descriptor.Descriptor(
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       options=None),
+    _descriptor.FieldDescriptor(
+      name='uid_slot', full_name='paddle.framework.MultiSlotDesc.uid_slot', index=1,
+      number=2, type=9, cpp_type=9, label=1,
+      has_default_value=False, default_value=_b("").decode('utf-8'),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None),
   ],
   extensions=[
   ],
@@ -112,7 +119,7 @@ _MULTISLOTDESC = _descriptor.Descriptor(
   oneofs=[
   ],
   serialized_start=137,
-  serialized_end=191,
+  serialized_end=209,
 )
 
 
@@ -179,6 +186,13 @@ _DATAFEEDDESC = _descriptor.Descriptor(
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       options=None),
+    _descriptor.FieldDescriptor(
+      name='so_parser_name', full_name='paddle.framework.DataFeedDesc.so_parser_name', index=8,
+      number=9, type=9, cpp_type=9, label=1,
+      has_default_value=False, default_value=_b("").decode('utf-8'),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None),
   ],
   extensions=[
   ],
@@ -191,8 +205,8 @@ _DATAFEEDDESC = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=194,
-  serialized_end=417,
+  serialized_start=212,
+  serialized_end=459,
 )
 
 _MULTISLOTDESC.fields_by_name['slots'].message_type = _SLOT

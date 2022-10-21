@@ -15,10 +15,13 @@
 from __future__ import print_function
 
 import astor
-import gast
+from paddle.utils import gast
 
 from paddle.fluid.dygraph.dygraph_to_static.static_analysis import AstNodeWrapper, StaticAnalysisVisitor
-from paddle.fluid.dygraph.dygraph_to_static.utils import ast_to_source_code, is_control_flow_to_transform
+from paddle.fluid.dygraph.dygraph_to_static.utils import ast_to_source_code
+from paddle.fluid.dygraph.dygraph_to_static.utils import slice_is_num
+from paddle.fluid.dygraph.dygraph_to_static.utils import is_control_flow_to_transform
+
 from paddle.fluid.dygraph.dygraph_to_static.utils import SplitAssignTransformer
 
 
@@ -90,7 +93,8 @@ class ListTransformer(gast.NodeTransformer):
         for child_node in gast.walk(node):
             if isinstance(child_node, gast.Assign):
                 if self._need_to_create_tensor_array(child_node):
-                    child_node.value = self._create_tensor_array()
+                    child_node.value = self._create_tensor_array(
+                        child_node.value)
 
     def _transform_list_append_in_control_flow(self, node):
         for child_node in gast.walk(node):
@@ -116,12 +120,13 @@ class ListTransformer(gast.NodeTransformer):
     def _transform_slice_to_tensor_write(self, node):
         assert isinstance(node, gast.Assign)
         target_node = node.targets[0]
+
         target_name = target_node.value.id
         slice_node = target_node.slice
 
         if isinstance(slice_node, gast.Slice):
             pass
-        elif isinstance(slice_node, gast.Index):
+        elif slice_is_num(target_node):
             value_code = ast_to_source_code(node.value)
             i = "paddle.cast(" \
                 "x=paddle.jit.dy2static.to_static_variable({})," \
@@ -185,9 +190,11 @@ class ListTransformer(gast.NodeTransformer):
             return True
         return False
 
-    def _create_tensor_array(self):
+    def _create_tensor_array(self, value_node):
         # Although `dtype='float32'`, other types such as `int32` can also be supported
-        func_code = "paddle.tensor.create_array(dtype='float32')"
+        init_value = ast_to_source_code(value_node).strip()
+        func_code = "paddle.tensor.create_array('float32', {})".format(
+            init_value)
         func_node = gast.parse(func_code).body[0].value
         return func_node
 

@@ -20,7 +20,7 @@ DESCRIPTOR = _descriptor.FileDescriptor(
   name='framework.proto',
   package='paddle.framework.proto',
   syntax='proto2',
-  serialized_pb=_b('\n\x0f\x66ramework.proto\x12\x16paddle.framework.proto\"\x1d\n\x07Version\x12\x12\n\x07version\x18\x01 \x01(\x03:\x01\x30\"\xfe\x03\n\x06OpDesc\x12\x0c\n\x04type\x18\x03 \x02(\t\x12\x32\n\x06inputs\x18\x01 \x03(\x0b\x32\".paddle.framework.proto.OpDesc.Var\x12\x33\n\x07outputs\x18\x02 \x03(\x0b\x32\".paddle.framework.proto.OpDesc.Var\x12\x32\n\x05\x61ttrs\x18\x04 \x03(\x0b\x32#.paddle.framework.proto.OpDesc.Attr\x12\x18\n\tis_target\x18\x05 \x01(\x08:\x05\x66\x61lse\x1a\x81\x02\n\x04\x41ttr\x12\x0c\n\x04name\x18\x01 \x02(\t\x12.\n\x04type\x18\x02 \x02(\x0e\x32 .paddle.framework.proto.AttrType\x12\t\n\x01i\x18\x03 \x01(\x05\x12\t\n\x01\x66\x18\x04 \x01(\x02\x12\t\n\x01s\x18\x05 \x01(\t\x12\x0c\n\x04ints\x18\x06 \x03(\x05\x12\x0e\n\x06\x66loats\x18\x07 \x03(\x02\x12\x0f\n\x07strings\x18\x08 \x03(\t\x12\t\n\x01\x62\x18\n \x01(\x08\x12\r\n\x05\x62ools\x18\x0b \x03(\x08\x12\x11\n\tblock_idx\x18\x0c \x01(\x05\x12\t\n\x01l\x18\r \x01(\x03\x12\x12\n\nblocks_idx\x18\x0e \x03(\x05\x12\r\n\x05longs\x18\x0f \x03(\x03\x12\x10\n\x08\x66loat64s\x18\x10 \x03(\x01\x1a+\n\x03Var\x12\x11\n\tparameter\x18\x01 \x02(\t\x12\x11\n\targuments\x18\x02 \x03(\t\"\xb3\x03\n\x07OpProto\x12\x0c\n\x04type\x18\x01 \x02(\t\x12\x33\n\x06inputs\x18\x02 \x03(\x0b\x32#.paddle.framework.proto.OpProto.Var\x12\x34\n\x07outputs\x18\x03 \x03(\x0b\x32#.paddle.framework.proto.OpProto.Var\x12\x33\n\x05\x61ttrs\x18\x04 \x03(\x0b\x32$.paddle.framework.proto.OpProto.Attr\x12\x0f\n\x07\x63omment\x18\x05 \x02(\t\x1ax\n\x03Var\x12\x0c\n\x04name\x18\x01 \x02(\t\x12\x0f\n\x07\x63omment\x18\x02 \x02(\t\x12\x19\n\nduplicable\x18\x03 \x01(\x08:\x05\x66\x61lse\x12\x1b\n\x0cintermediate\x18\x04 \x01(\x08:\x05\x66\x61lse\x12\x1a\n\x0b\x64ispensable\x18\x05 \x01(\x08:\x05\x66\x61lse\x1ao\n\x04\x41ttr\x12\x0c\n\x04name\x18\x01 \x02(\t\x12.\n\x04type\x18\x02 \x02(\x0e\x32 .paddle.framework.proto.AttrType\x12\x0f\n\x07\x63omment\x18\x03 \x02(\t\x12\x18\n\tgenerated\x18\x04 \x01(\x08:\x05\x66\x61lse\"\x83\t\n\x07VarType\x12\x32\n\x04type\x18\x01 \x02(\x0e\x32$.paddle.framework.proto.VarType.Type\x12\x41\n\rselected_rows\x18\x02 \x01(\x0b\x32*.paddle.framework.proto.VarType.TensorDesc\x12\x41\n\nlod_tensor\x18\x03 \x01(\x0b\x32-.paddle.framework.proto.VarType.LoDTensorDesc\x12H\n\x0ctensor_array\x18\x04 \x01(\x0b\x32\x32.paddle.framework.proto.VarType.LoDTensorArrayDesc\x12:\n\x06reader\x18\x05 \x01(\x0b\x32*.paddle.framework.proto.VarType.ReaderDesc\x12\x34\n\x05tuple\x18\x07 \x01(\x0b\x32%.paddle.framework.proto.VarType.Tuple\x1aS\n\nTensorDesc\x12\x37\n\tdata_type\x18\x01 \x02(\x0e\x32$.paddle.framework.proto.VarType.Type\x12\x0c\n\x04\x64ims\x18\x02 \x03(\x03\x1a\x61\n\rLoDTensorDesc\x12:\n\x06tensor\x18\x01 \x02(\x0b\x32*.paddle.framework.proto.VarType.TensorDesc\x12\x14\n\tlod_level\x18\x02 \x01(\x05:\x01\x30\x1a\x66\n\x12LoDTensorArrayDesc\x12:\n\x06tensor\x18\x01 \x02(\x0b\x32*.paddle.framework.proto.VarType.TensorDesc\x12\x14\n\tlod_level\x18\x02 \x01(\x05:\x01\x30\x1aO\n\nReaderDesc\x12\x41\n\nlod_tensor\x18\x01 \x03(\x0b\x32-.paddle.framework.proto.VarType.LoDTensorDesc\x1a\x43\n\x05Tuple\x12:\n\x0c\x65lement_type\x18\x01 \x03(\x0e\x32$.paddle.framework.proto.VarType.Type\"\xcb\x02\n\x04Type\x12\x08\n\x04\x42OOL\x10\x00\x12\t\n\x05INT16\x10\x01\x12\t\n\x05INT32\x10\x02\x12\t\n\x05INT64\x10\x03\x12\x08\n\x04\x46P16\x10\x04\x12\x08\n\x04\x46P32\x10\x05\x12\x08\n\x04\x46P64\x10\x06\x12\n\n\x06SIZE_T\x10\x13\x12\t\n\x05UINT8\x10\x14\x12\x08\n\x04INT8\x10\x15\x12\x08\n\x04\x42\x46\x31\x36\x10\x16\x12\r\n\tCOMPLEX64\x10\x17\x12\x0e\n\nCOMPLEX128\x10\x18\x12\x0e\n\nLOD_TENSOR\x10\x07\x12\x11\n\rSELECTED_ROWS\x10\x08\x12\x12\n\x0e\x46\x45\x45\x44_MINIBATCH\x10\t\x12\x0e\n\nFETCH_LIST\x10\n\x12\x0f\n\x0bSTEP_SCOPES\x10\x0b\x12\x12\n\x0eLOD_RANK_TABLE\x10\x0c\x12\x14\n\x10LOD_TENSOR_ARRAY\x10\r\x12\x0e\n\nPLACE_LIST\x10\x0e\x12\n\n\x06READER\x10\x0f\x12\x07\n\x03RAW\x10\x11\x12\t\n\x05TUPLE\x10\x12\"\x82\x01\n\x07VarDesc\x12\x0c\n\x04name\x18\x01 \x02(\t\x12-\n\x04type\x18\x02 \x02(\x0b\x32\x1f.paddle.framework.proto.VarType\x12\x1a\n\x0bpersistable\x18\x03 \x01(\x08:\x05\x66\x61lse\x12\x1e\n\x0fneed_check_feed\x18\x04 \x01(\x08:\x05\x66\x61lse\"\xa7\x01\n\tBlockDesc\x12\x0b\n\x03idx\x18\x01 \x02(\x05\x12\x12\n\nparent_idx\x18\x02 \x02(\x05\x12-\n\x04vars\x18\x03 \x03(\x0b\x32\x1f.paddle.framework.proto.VarDesc\x12+\n\x03ops\x18\x04 \x03(\x0b\x32\x1e.paddle.framework.proto.OpDesc\x12\x1d\n\x11\x66orward_block_idx\x18\x05 \x01(\x05:\x02-1\"\x1c\n\tOpVersion\x12\x0f\n\x07version\x18\x01 \x02(\x05\"\xa9\x01\n\x0cOpVersionMap\x12@\n\x04pair\x18\x01 \x03(\x0b\x32\x32.paddle.framework.proto.OpVersionMap.OpVersionPair\x1aW\n\rOpVersionPair\x12\x0f\n\x07op_name\x18\x01 \x02(\t\x12\x35\n\nop_version\x18\x02 \x02(\x0b\x32!.paddle.framework.proto.OpVersion\"\xbc\x01\n\x0bProgramDesc\x12\x31\n\x06\x62locks\x18\x01 \x03(\x0b\x32!.paddle.framework.proto.BlockDesc\x12\x30\n\x07version\x18\x04 \x01(\x0b\x32\x1f.paddle.framework.proto.Version\x12<\n\x0eop_version_map\x18\x05 \x01(\x0b\x32$.paddle.framework.proto.OpVersionMapJ\x04\x08\x02\x10\x03J\x04\x08\x03\x10\x04*\xa2\x01\n\x08\x41ttrType\x12\x07\n\x03INT\x10\x00\x12\t\n\x05\x46LOAT\x10\x01\x12\n\n\x06STRING\x10\x02\x12\x08\n\x04INTS\x10\x03\x12\n\n\x06\x46LOATS\x10\x04\x12\x0b\n\x07STRINGS\x10\x05\x12\x0b\n\x07\x42OOLEAN\x10\x06\x12\x0c\n\x08\x42OOLEANS\x10\x07\x12\t\n\x05\x42LOCK\x10\x08\x12\x08\n\x04LONG\x10\t\x12\n\n\x06\x42LOCKS\x10\n\x12\t\n\x05LONGS\x10\x0b\x12\x0c\n\x08\x46LOAT64S\x10\x0c')
+  serialized_pb=_b('\n\x0f\x66ramework.proto\x12\x16paddle.framework.proto\"\x1d\n\x07Version\x12\x12\n\x07version\x18\x01 \x01(\x03:\x01\x30\"Y\n\x0fProcessMeshDesc\x12\n\n\x02id\x18\x01 \x02(\x05\x12\x11\n\tparent_id\x18\x02 \x02(\x05\x12\x10\n\x08topology\x18\x03 \x03(\x05\x12\x15\n\rprocess_group\x18\x04 \x03(\x05\"\xfe\x03\n\x06OpDesc\x12\x0c\n\x04type\x18\x03 \x02(\t\x12\x32\n\x06inputs\x18\x01 \x03(\x0b\x32\".paddle.framework.proto.OpDesc.Var\x12\x33\n\x07outputs\x18\x02 \x03(\x0b\x32\".paddle.framework.proto.OpDesc.Var\x12\x32\n\x05\x61ttrs\x18\x04 \x03(\x0b\x32#.paddle.framework.proto.OpDesc.Attr\x12\x18\n\tis_target\x18\x05 \x01(\x08:\x05\x66\x61lse\x1a\x81\x02\n\x04\x41ttr\x12\x0c\n\x04name\x18\x01 \x02(\t\x12.\n\x04type\x18\x02 \x02(\x0e\x32 .paddle.framework.proto.AttrType\x12\t\n\x01i\x18\x03 \x01(\x05\x12\t\n\x01\x66\x18\x04 \x01(\x02\x12\t\n\x01s\x18\x05 \x01(\t\x12\x0c\n\x04ints\x18\x06 \x03(\x05\x12\x0e\n\x06\x66loats\x18\x07 \x03(\x02\x12\x0f\n\x07strings\x18\x08 \x03(\t\x12\t\n\x01\x62\x18\n \x01(\x08\x12\r\n\x05\x62ools\x18\x0b \x03(\x08\x12\x11\n\tblock_idx\x18\x0c \x01(\x05\x12\t\n\x01l\x18\r \x01(\x03\x12\x12\n\nblocks_idx\x18\x0e \x03(\x05\x12\r\n\x05longs\x18\x0f \x03(\x03\x12\x10\n\x08\x66loat64s\x18\x10 \x03(\x01\x1a+\n\x03Var\x12\x11\n\tparameter\x18\x01 \x02(\t\x12\x11\n\targuments\x18\x02 \x03(\t\"\x8d\x04\n\x07OpProto\x12\x0c\n\x04type\x18\x01 \x02(\t\x12\x33\n\x06inputs\x18\x02 \x03(\x0b\x32#.paddle.framework.proto.OpProto.Var\x12\x34\n\x07outputs\x18\x03 \x03(\x0b\x32#.paddle.framework.proto.OpProto.Var\x12\x33\n\x05\x61ttrs\x18\x04 \x03(\x0b\x32$.paddle.framework.proto.OpProto.Attr\x12\x0f\n\x07\x63omment\x18\x05 \x02(\t\x1a\xa4\x01\n\x03Var\x12\x0c\n\x04name\x18\x01 \x02(\t\x12\x0f\n\x07\x63omment\x18\x02 \x02(\t\x12\x19\n\nduplicable\x18\x03 \x01(\x08:\x05\x66\x61lse\x12\x1b\n\x0cintermediate\x18\x04 \x01(\x08:\x05\x66\x61lse\x12\x1a\n\x0b\x64ispensable\x18\x05 \x01(\x08:\x05\x66\x61lse\x12\x14\n\x05\x65xtra\x18\x06 \x01(\x08:\x05\x66\x61lse\x12\x14\n\x05quant\x18\x07 \x01(\x08:\x05\x66\x61lse\x1a\x9b\x01\n\x04\x41ttr\x12\x0c\n\x04name\x18\x01 \x02(\t\x12.\n\x04type\x18\x02 \x02(\x0e\x32 .paddle.framework.proto.AttrType\x12\x0f\n\x07\x63omment\x18\x03 \x02(\t\x12\x18\n\tgenerated\x18\x04 \x01(\x08:\x05\x66\x61lse\x12\x14\n\x05\x65xtra\x18\x05 \x01(\x08:\x05\x66\x61lse\x12\x14\n\x05quant\x18\x06 \x01(\x08:\x05\x66\x61lse\"\xf7\n\n\x07VarType\x12\x32\n\x04type\x18\x01 \x02(\x0e\x32$.paddle.framework.proto.VarType.Type\x12\x41\n\rselected_rows\x18\x02 \x01(\x0b\x32*.paddle.framework.proto.VarType.TensorDesc\x12\x41\n\nlod_tensor\x18\x03 \x01(\x0b\x32-.paddle.framework.proto.VarType.LoDTensorDesc\x12H\n\x0ctensor_array\x18\x04 \x01(\x0b\x32\x32.paddle.framework.proto.VarType.LoDTensorArrayDesc\x12:\n\x06reader\x18\x05 \x01(\x0b\x32*.paddle.framework.proto.VarType.ReaderDesc\x12\x34\n\x05tuple\x18\x07 \x01(\x0b\x32%.paddle.framework.proto.VarType.Tuple\x12:\n\x06string\x18\x08 \x01(\x0b\x32*.paddle.framework.proto.VarType.TensorDesc\x12;\n\x07strings\x18\t \x01(\x0b\x32*.paddle.framework.proto.VarType.TensorDesc\x12\x39\n\x05vocab\x18\n \x01(\x0b\x32*.paddle.framework.proto.VarType.TensorDesc\x1aS\n\nTensorDesc\x12\x37\n\tdata_type\x18\x01 \x02(\x0e\x32$.paddle.framework.proto.VarType.Type\x12\x0c\n\x04\x64ims\x18\x02 \x03(\x03\x1a\x61\n\rLoDTensorDesc\x12:\n\x06tensor\x18\x01 \x02(\x0b\x32*.paddle.framework.proto.VarType.TensorDesc\x12\x14\n\tlod_level\x18\x02 \x01(\x05:\x01\x30\x1a\x66\n\x12LoDTensorArrayDesc\x12:\n\x06tensor\x18\x01 \x02(\x0b\x32*.paddle.framework.proto.VarType.TensorDesc\x12\x14\n\tlod_level\x18\x02 \x01(\x05:\x01\x30\x1aO\n\nReaderDesc\x12\x41\n\nlod_tensor\x18\x01 \x03(\x0b\x32-.paddle.framework.proto.VarType.LoDTensorDesc\x1a\x43\n\x05Tuple\x12:\n\x0c\x65lement_type\x18\x01 \x03(\x0e\x32$.paddle.framework.proto.VarType.Type\"\x8b\x03\n\x04Type\x12\x08\n\x04\x42OOL\x10\x00\x12\t\n\x05INT16\x10\x01\x12\t\n\x05INT32\x10\x02\x12\t\n\x05INT64\x10\x03\x12\x08\n\x04\x46P16\x10\x04\x12\x08\n\x04\x46P32\x10\x05\x12\x08\n\x04\x46P64\x10\x06\x12\n\n\x06SIZE_T\x10\x13\x12\t\n\x05UINT8\x10\x14\x12\x08\n\x04INT8\x10\x15\x12\x08\n\x04\x42\x46\x31\x36\x10\x16\x12\r\n\tCOMPLEX64\x10\x17\x12\x0e\n\nCOMPLEX128\x10\x18\x12\x0e\n\nLOD_TENSOR\x10\x07\x12\x11\n\rSELECTED_ROWS\x10\x08\x12\x12\n\x0e\x46\x45\x45\x44_MINIBATCH\x10\t\x12\x0e\n\nFETCH_LIST\x10\n\x12\x0f\n\x0bSTEP_SCOPES\x10\x0b\x12\x12\n\x0eLOD_RANK_TABLE\x10\x0c\x12\x14\n\x10LOD_TENSOR_ARRAY\x10\r\x12\x0e\n\nPLACE_LIST\x10\x0e\x12\n\n\x06READER\x10\x0f\x12\x07\n\x03RAW\x10\x11\x12\t\n\x05TUPLE\x10\x12\x12\n\n\x06STRING\x10\x19\x12\x0b\n\x07STRINGS\x10\x1a\x12\t\n\x05VOCAB\x10\x1b\x12\r\n\tFEED_LIST\x10\x1c\x12\x0b\n\x07PSTRING\x10\x1d\"\xdc\x02\n\x07VarDesc\x12\x0c\n\x04name\x18\x01 \x02(\t\x12-\n\x04type\x18\x02 \x02(\x0b\x32\x1f.paddle.framework.proto.VarType\x12\x1a\n\x0bpersistable\x18\x03 \x01(\x08:\x05\x66\x61lse\x12\x1e\n\x0fneed_check_feed\x18\x04 \x01(\x08:\x05\x66\x61lse\x12\x1b\n\x0cis_parameter\x18\x05 \x01(\x08:\x05\x66\x61lse\x12\x1c\n\rstop_gradient\x18\x06 \x01(\x08:\x05\x66\x61lse\x12\x33\n\x05\x61ttrs\x18\x07 \x03(\x0b\x32$.paddle.framework.proto.VarDesc.Attr\x1ah\n\x04\x41ttr\x12\x0c\n\x04name\x18\x01 \x02(\t\x12.\n\x04type\x18\x02 \x02(\x0e\x32 .paddle.framework.proto.AttrType\x12\t\n\x01i\x18\x03 \x01(\x05\x12\t\n\x01s\x18\x04 \x01(\t\x12\x0c\n\x04ints\x18\x05 \x03(\x05\"\xa7\x01\n\tBlockDesc\x12\x0b\n\x03idx\x18\x01 \x02(\x05\x12\x12\n\nparent_idx\x18\x02 \x02(\x05\x12-\n\x04vars\x18\x03 \x03(\x0b\x32\x1f.paddle.framework.proto.VarDesc\x12+\n\x03ops\x18\x04 \x03(\x0b\x32\x1e.paddle.framework.proto.OpDesc\x12\x1d\n\x11\x66orward_block_idx\x18\x05 \x01(\x05:\x02-1\"\x1c\n\tOpVersion\x12\x0f\n\x07version\x18\x01 \x02(\x05\"\xa9\x01\n\x0cOpVersionMap\x12@\n\x04pair\x18\x01 \x03(\x0b\x32\x32.paddle.framework.proto.OpVersionMap.OpVersionPair\x1aW\n\rOpVersionPair\x12\x0f\n\x07op_name\x18\x01 \x02(\t\x12\x35\n\nop_version\x18\x02 \x02(\x0b\x32!.paddle.framework.proto.OpVersion\"\xbc\x01\n\x0bProgramDesc\x12\x31\n\x06\x62locks\x18\x01 \x03(\x0b\x32!.paddle.framework.proto.BlockDesc\x12\x30\n\x07version\x18\x04 \x01(\x0b\x32\x1f.paddle.framework.proto.Version\x12<\n\x0eop_version_map\x18\x05 \x01(\x0b\x32$.paddle.framework.proto.OpVersionMapJ\x04\x08\x02\x10\x03J\x04\x08\x03\x10\x04*\xa2\x01\n\x08\x41ttrType\x12\x07\n\x03INT\x10\x00\x12\t\n\x05\x46LOAT\x10\x01\x12\n\n\x06STRING\x10\x02\x12\x08\n\x04INTS\x10\x03\x12\n\n\x06\x46LOATS\x10\x04\x12\x0b\n\x07STRINGS\x10\x05\x12\x0b\n\x07\x42OOLEAN\x10\x06\x12\x0c\n\x08\x42OOLEANS\x10\x07\x12\t\n\x05\x42LOCK\x10\x08\x12\x08\n\x04LONG\x10\t\x12\n\n\x06\x42LOCKS\x10\n\x12\t\n\x05LONGS\x10\x0b\x12\x0c\n\x08\x46LOAT64S\x10\x0c')
 )
 _sym_db.RegisterFileDescriptor(DESCRIPTOR)
 
@@ -85,8 +85,8 @@ _ATTRTYPE = _descriptor.EnumDescriptor(
   ],
   containing_type=None,
   options=None,
-  serialized_start=2880,
-  serialized_end=3042,
+  serialized_start=3523,
+  serialized_end=3685,
 )
 _sym_db.RegisterEnumDescriptor(_ATTRTYPE)
 
@@ -208,11 +208,31 @@ _VARTYPE_TYPE = _descriptor.EnumDescriptor(
       name='TUPLE', index=23, number=18,
       options=None,
       type=None),
+    _descriptor.EnumValueDescriptor(
+      name='STRING', index=24, number=25,
+      options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='STRINGS', index=25, number=26,
+      options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='VOCAB', index=26, number=27,
+      options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='FEED_LIST', index=27, number=28,
+      options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='PSTRING', index=28, number=29,
+      options=None,
+      type=None),
   ],
   containing_type=None,
   options=None,
-  serialized_start=1850,
-  serialized_end=2181,
+  serialized_start=2211,
+  serialized_end=2606,
 )
 _sym_db.RegisterEnumDescriptor(_VARTYPE_TYPE)
 
@@ -245,6 +265,58 @@ _VERSION = _descriptor.Descriptor(
   ],
   serialized_start=43,
   serialized_end=72,
+)
+
+
+_PROCESSMESHDESC = _descriptor.Descriptor(
+  name='ProcessMeshDesc',
+  full_name='paddle.framework.proto.ProcessMeshDesc',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='id', full_name='paddle.framework.proto.ProcessMeshDesc.id', index=0,
+      number=1, type=5, cpp_type=1, label=2,
+      has_default_value=False, default_value=0,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None),
+    _descriptor.FieldDescriptor(
+      name='parent_id', full_name='paddle.framework.proto.ProcessMeshDesc.parent_id', index=1,
+      number=2, type=5, cpp_type=1, label=2,
+      has_default_value=False, default_value=0,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None),
+    _descriptor.FieldDescriptor(
+      name='topology', full_name='paddle.framework.proto.ProcessMeshDesc.topology', index=2,
+      number=3, type=5, cpp_type=1, label=3,
+      has_default_value=False, default_value=[],
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None),
+    _descriptor.FieldDescriptor(
+      name='process_group', full_name='paddle.framework.proto.ProcessMeshDesc.process_group', index=3,
+      number=4, type=5, cpp_type=1, label=3,
+      has_default_value=False, default_value=[],
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  options=None,
+  is_extendable=False,
+  syntax='proto2',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=74,
+  serialized_end=163,
 )
 
 
@@ -372,8 +444,8 @@ _OPDESC_ATTR = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=283,
-  serialized_end=540,
+  serialized_start=374,
+  serialized_end=631,
 )
 
 _OPDESC_VAR = _descriptor.Descriptor(
@@ -409,8 +481,8 @@ _OPDESC_VAR = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=542,
-  serialized_end=585,
+  serialized_start=633,
+  serialized_end=676,
 )
 
 _OPDESC = _descriptor.Descriptor(
@@ -467,8 +539,8 @@ _OPDESC = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=75,
-  serialized_end=585,
+  serialized_start=166,
+  serialized_end=676,
 )
 
 
@@ -514,6 +586,20 @@ _OPPROTO_VAR = _descriptor.Descriptor(
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       options=None),
+    _descriptor.FieldDescriptor(
+      name='extra', full_name='paddle.framework.proto.OpProto.Var.extra', index=5,
+      number=6, type=8, cpp_type=7, label=1,
+      has_default_value=True, default_value=False,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None),
+    _descriptor.FieldDescriptor(
+      name='quant', full_name='paddle.framework.proto.OpProto.Var.quant', index=6,
+      number=7, type=8, cpp_type=7, label=1,
+      has_default_value=True, default_value=False,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None),
   ],
   extensions=[
   ],
@@ -526,8 +612,8 @@ _OPPROTO_VAR = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=790,
-  serialized_end=910,
+  serialized_start=882,
+  serialized_end=1046,
 )
 
 _OPPROTO_ATTR = _descriptor.Descriptor(
@@ -565,6 +651,20 @@ _OPPROTO_ATTR = _descriptor.Descriptor(
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       options=None),
+    _descriptor.FieldDescriptor(
+      name='extra', full_name='paddle.framework.proto.OpProto.Attr.extra', index=4,
+      number=5, type=8, cpp_type=7, label=1,
+      has_default_value=True, default_value=False,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None),
+    _descriptor.FieldDescriptor(
+      name='quant', full_name='paddle.framework.proto.OpProto.Attr.quant', index=5,
+      number=6, type=8, cpp_type=7, label=1,
+      has_default_value=True, default_value=False,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None),
   ],
   extensions=[
   ],
@@ -577,8 +677,8 @@ _OPPROTO_ATTR = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=912,
-  serialized_end=1023,
+  serialized_start=1049,
+  serialized_end=1204,
 )
 
 _OPPROTO = _descriptor.Descriptor(
@@ -635,8 +735,8 @@ _OPPROTO = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=588,
-  serialized_end=1023,
+  serialized_start=679,
+  serialized_end=1204,
 )
 
 
@@ -673,8 +773,8 @@ _VARTYPE_TENSORDESC = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1411,
-  serialized_end=1494,
+  serialized_start=1772,
+  serialized_end=1855,
 )
 
 _VARTYPE_LODTENSORDESC = _descriptor.Descriptor(
@@ -710,8 +810,8 @@ _VARTYPE_LODTENSORDESC = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1496,
-  serialized_end=1593,
+  serialized_start=1857,
+  serialized_end=1954,
 )
 
 _VARTYPE_LODTENSORARRAYDESC = _descriptor.Descriptor(
@@ -747,8 +847,8 @@ _VARTYPE_LODTENSORARRAYDESC = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1595,
-  serialized_end=1697,
+  serialized_start=1956,
+  serialized_end=2058,
 )
 
 _VARTYPE_READERDESC = _descriptor.Descriptor(
@@ -777,8 +877,8 @@ _VARTYPE_READERDESC = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1699,
-  serialized_end=1778,
+  serialized_start=2060,
+  serialized_end=2139,
 )
 
 _VARTYPE_TUPLE = _descriptor.Descriptor(
@@ -807,8 +907,8 @@ _VARTYPE_TUPLE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1780,
-  serialized_end=1847,
+  serialized_start=2141,
+  serialized_end=2208,
 )
 
 _VARTYPE = _descriptor.Descriptor(
@@ -860,6 +960,27 @@ _VARTYPE = _descriptor.Descriptor(
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       options=None),
+    _descriptor.FieldDescriptor(
+      name='string', full_name='paddle.framework.proto.VarType.string', index=6,
+      number=8, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None),
+    _descriptor.FieldDescriptor(
+      name='strings', full_name='paddle.framework.proto.VarType.strings', index=7,
+      number=9, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None),
+    _descriptor.FieldDescriptor(
+      name='vocab', full_name='paddle.framework.proto.VarType.vocab', index=8,
+      number=10, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None),
   ],
   extensions=[
   ],
@@ -873,10 +994,68 @@ _VARTYPE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1026,
-  serialized_end=2181,
+  serialized_start=1207,
+  serialized_end=2606,
 )
 
+
+_VARDESC_ATTR = _descriptor.Descriptor(
+  name='Attr',
+  full_name='paddle.framework.proto.VarDesc.Attr',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='name', full_name='paddle.framework.proto.VarDesc.Attr.name', index=0,
+      number=1, type=9, cpp_type=9, label=2,
+      has_default_value=False, default_value=_b("").decode('utf-8'),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None),
+    _descriptor.FieldDescriptor(
+      name='type', full_name='paddle.framework.proto.VarDesc.Attr.type', index=1,
+      number=2, type=14, cpp_type=8, label=2,
+      has_default_value=False, default_value=0,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None),
+    _descriptor.FieldDescriptor(
+      name='i', full_name='paddle.framework.proto.VarDesc.Attr.i', index=2,
+      number=3, type=5, cpp_type=1, label=1,
+      has_default_value=False, default_value=0,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None),
+    _descriptor.FieldDescriptor(
+      name='s', full_name='paddle.framework.proto.VarDesc.Attr.s', index=3,
+      number=4, type=9, cpp_type=9, label=1,
+      has_default_value=False, default_value=_b("").decode('utf-8'),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None),
+    _descriptor.FieldDescriptor(
+      name='ints', full_name='paddle.framework.proto.VarDesc.Attr.ints', index=4,
+      number=5, type=5, cpp_type=1, label=3,
+      has_default_value=False, default_value=[],
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  options=None,
+  is_extendable=False,
+  syntax='proto2',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=2853,
+  serialized_end=2957,
+)
 
 _VARDESC = _descriptor.Descriptor(
   name='VarDesc',
@@ -913,10 +1092,31 @@ _VARDESC = _descriptor.Descriptor(
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       options=None),
+    _descriptor.FieldDescriptor(
+      name='is_parameter', full_name='paddle.framework.proto.VarDesc.is_parameter', index=4,
+      number=5, type=8, cpp_type=7, label=1,
+      has_default_value=True, default_value=False,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None),
+    _descriptor.FieldDescriptor(
+      name='stop_gradient', full_name='paddle.framework.proto.VarDesc.stop_gradient', index=5,
+      number=6, type=8, cpp_type=7, label=1,
+      has_default_value=True, default_value=False,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None),
+    _descriptor.FieldDescriptor(
+      name='attrs', full_name='paddle.framework.proto.VarDesc.attrs', index=6,
+      number=7, type=11, cpp_type=10, label=3,
+      has_default_value=False, default_value=[],
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None),
   ],
   extensions=[
   ],
-  nested_types=[],
+  nested_types=[_VARDESC_ATTR, ],
   enum_types=[
   ],
   options=None,
@@ -925,8 +1125,8 @@ _VARDESC = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2184,
-  serialized_end=2314,
+  serialized_start=2609,
+  serialized_end=2957,
 )
 
 
@@ -984,8 +1184,8 @@ _BLOCKDESC = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2317,
-  serialized_end=2484,
+  serialized_start=2960,
+  serialized_end=3127,
 )
 
 
@@ -1015,8 +1215,8 @@ _OPVERSION = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2486,
-  serialized_end=2514,
+  serialized_start=3129,
+  serialized_end=3157,
 )
 
 
@@ -1053,8 +1253,8 @@ _OPVERSIONMAP_OPVERSIONPAIR = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2599,
-  serialized_end=2686,
+  serialized_start=3242,
+  serialized_end=3329,
 )
 
 _OPVERSIONMAP = _descriptor.Descriptor(
@@ -1083,8 +1283,8 @@ _OPVERSIONMAP = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2517,
-  serialized_end=2686,
+  serialized_start=3160,
+  serialized_end=3329,
 )
 
 
@@ -1128,8 +1328,8 @@ _PROGRAMDESC = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2689,
-  serialized_end=2877,
+  serialized_start=3332,
+  serialized_end=3520,
 )
 
 _OPDESC_ATTR.fields_by_name['type'].enum_type = _ATTRTYPE
@@ -1160,8 +1360,14 @@ _VARTYPE.fields_by_name['lod_tensor'].message_type = _VARTYPE_LODTENSORDESC
 _VARTYPE.fields_by_name['tensor_array'].message_type = _VARTYPE_LODTENSORARRAYDESC
 _VARTYPE.fields_by_name['reader'].message_type = _VARTYPE_READERDESC
 _VARTYPE.fields_by_name['tuple'].message_type = _VARTYPE_TUPLE
+_VARTYPE.fields_by_name['string'].message_type = _VARTYPE_TENSORDESC
+_VARTYPE.fields_by_name['strings'].message_type = _VARTYPE_TENSORDESC
+_VARTYPE.fields_by_name['vocab'].message_type = _VARTYPE_TENSORDESC
 _VARTYPE_TYPE.containing_type = _VARTYPE
+_VARDESC_ATTR.fields_by_name['type'].enum_type = _ATTRTYPE
+_VARDESC_ATTR.containing_type = _VARDESC
 _VARDESC.fields_by_name['type'].message_type = _VARTYPE
+_VARDESC.fields_by_name['attrs'].message_type = _VARDESC_ATTR
 _BLOCKDESC.fields_by_name['vars'].message_type = _VARDESC
 _BLOCKDESC.fields_by_name['ops'].message_type = _OPDESC
 _OPVERSIONMAP_OPVERSIONPAIR.fields_by_name['op_version'].message_type = _OPVERSION
@@ -1171,6 +1377,7 @@ _PROGRAMDESC.fields_by_name['blocks'].message_type = _BLOCKDESC
 _PROGRAMDESC.fields_by_name['version'].message_type = _VERSION
 _PROGRAMDESC.fields_by_name['op_version_map'].message_type = _OPVERSIONMAP
 DESCRIPTOR.message_types_by_name['Version'] = _VERSION
+DESCRIPTOR.message_types_by_name['ProcessMeshDesc'] = _PROCESSMESHDESC
 DESCRIPTOR.message_types_by_name['OpDesc'] = _OPDESC
 DESCRIPTOR.message_types_by_name['OpProto'] = _OPPROTO
 DESCRIPTOR.message_types_by_name['VarType'] = _VARTYPE
@@ -1187,6 +1394,13 @@ Version = _reflection.GeneratedProtocolMessageType('Version', (_message.Message,
   # @@protoc_insertion_point(class_scope:paddle.framework.proto.Version)
   ))
 _sym_db.RegisterMessage(Version)
+
+ProcessMeshDesc = _reflection.GeneratedProtocolMessageType('ProcessMeshDesc', (_message.Message,), dict(
+  DESCRIPTOR = _PROCESSMESHDESC,
+  __module__ = 'framework_pb2'
+  # @@protoc_insertion_point(class_scope:paddle.framework.proto.ProcessMeshDesc)
+  ))
+_sym_db.RegisterMessage(ProcessMeshDesc)
 
 OpDesc = _reflection.GeneratedProtocolMessageType('OpDesc', (_message.Message,), dict(
 
@@ -1282,11 +1496,19 @@ _sym_db.RegisterMessage(VarType.ReaderDesc)
 _sym_db.RegisterMessage(VarType.Tuple)
 
 VarDesc = _reflection.GeneratedProtocolMessageType('VarDesc', (_message.Message,), dict(
+
+  Attr = _reflection.GeneratedProtocolMessageType('Attr', (_message.Message,), dict(
+    DESCRIPTOR = _VARDESC_ATTR,
+    __module__ = 'framework_pb2'
+    # @@protoc_insertion_point(class_scope:paddle.framework.proto.VarDesc.Attr)
+    ))
+  ,
   DESCRIPTOR = _VARDESC,
   __module__ = 'framework_pb2'
   # @@protoc_insertion_point(class_scope:paddle.framework.proto.VarDesc)
   ))
 _sym_db.RegisterMessage(VarDesc)
+_sym_db.RegisterMessage(VarDesc.Attr)
 
 BlockDesc = _reflection.GeneratedProtocolMessageType('BlockDesc', (_message.Message,), dict(
   DESCRIPTOR = _BLOCKDESC,

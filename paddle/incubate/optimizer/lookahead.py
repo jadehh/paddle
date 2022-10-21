@@ -20,7 +20,7 @@ import paddle
 import numpy as np
 from paddle.fluid.dygraph import base as imperative_base
 
-__all__ = ["LookAhead"]
+__all__ = []
 
 
 class LookAhead(Optimizer):
@@ -99,7 +99,7 @@ class LookAhead(Optimizer):
             layer = LinearNet()
             loss_fn = nn.CrossEntropyLoss()
             optimizer = paddle.optimizer.SGD(learning_rate=0.1, parameters=layer.parameters())
-            lookahead = paddle.incubate.optimizer.LookAhead(optimizer, alpha=0.2, k=5)
+            lookahead = paddle.incubate.LookAhead(optimizer, alpha=0.2, k=5)
 
             # create data loader
             dataset = RandomDataset(BATCH_NUM * BATCH_SIZE)
@@ -163,7 +163,7 @@ class LookAhead(Optimizer):
                 out = linear(inp)
                 loss = paddle.mean(out)
                 sgd = paddle.optimizer.SGD(learning_rate=0.1,parameters=linear.parameters())
-                lookahead = paddle.incubate.optimizer.LookAhead(sgd, alpha=0.2, k=5)
+                lookahead = paddle.incubate.LookAhead(sgd, alpha=0.2, k=5)
                 loss.backward()
                 lookahead.step()
                 lookahead.clear_grad()
@@ -171,6 +171,7 @@ class LookAhead(Optimizer):
         """
         self.inner_optimizer.step()
 
+        self._increment_global_var()
         params_grads = []
         for param in self._parameter_list:
             if not param.trainable:
@@ -188,7 +189,7 @@ class LookAhead(Optimizer):
         for p in parameters:
             self._add_accumulator(self._slow_str, p)
 
-    def _append_optimize_op(self, block, param_and_grad):
+    def _increment_global_var(self):
         if self._global_step_var is None:
             self._global_step_var = layers.create_global_var(
                 name=unique_name.generate("lookahead_step"),
@@ -203,6 +204,7 @@ class LookAhead(Optimizer):
             outputs={'Out': [self._global_step_var]},
             attrs={'step': 1.0})
 
+    def _append_optimize_op(self, block, param_and_grad):
         one_var = paddle.ones(shape=[1], dtype='int32', name='lookahead_ones')
         zero_var = paddle.zeros(
             shape=[1], dtype='int32', name='lookahead_zeros')
@@ -272,7 +274,7 @@ class LookAhead(Optimizer):
                 out = linear(inp)
                 loss = paddle.mean(out)
                 sgd = paddle.optimizer.SGD(learning_rate=0.1,parameters=linear.parameters())
-                lookahead = paddle.incubate.optimizer.LookAhead(sgd, alpha=0.2, k=5)
+                lookahead = paddle.incubate.LookAhead(sgd, alpha=0.2, k=5)
                 loss.backward()
                 lookahead.minimize(loss)
                 lookahead.clear_grad()
@@ -280,15 +282,14 @@ class LookAhead(Optimizer):
         """
         assert isinstance(loss, Variable), "The loss should be an Tensor."
 
-        parameter_list = parameters if parameters \
-            else self._parameter_list
-
         # Apply inner optimizer to the main_program
         optimize_ops, params_grads = self.inner_optimizer.minimize(
             loss,
             startup_program=startup_program,
             parameters=parameters,
             no_grad_set=no_grad_set)
+
+        self._increment_global_var()
 
         _ = self._apply_optimize(
             loss, startup_program=startup_program, params_grads=params_grads)

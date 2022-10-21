@@ -7,7 +7,7 @@
 # @Software : Samples
 # @Desc     :
 import sys
-sys.path.append("python_lib")
+sys.path.append("/mnt/h/Libs/paddle/v2.3/python_libs")
 import paddle
 from paddle import inference
 from paddle.fluid import ir
@@ -17,3 +17,4 @@ from paddle.fluid.ir import *
 from paddle.fluid.proto.pass_desc_pb2 import *
 if __name__ == '__main__':
     print(paddle.__version__)
+    paddle.utils.run_check()

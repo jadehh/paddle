@@ -20,11 +20,12 @@ from __future__ import print_function
 import warnings
 from ..layer_helper import LayerHelper
 from ..initializer import Normal, Constant
-from ..framework import Variable, in_dygraph_mode, _varbase_creator
+from ..framework import Variable, _non_static_mode, _varbase_creator, _in_legacy_dygraph, in_dygraph_mode
 from .. import core
 from ..param_attr import ParamAttr
 from . import nn
 from ..data_feeder import check_variable_and_dtype
+from paddle import _C_ops
 
 __all__ = ['accuracy', 'auc']
 
@@ -77,21 +78,36 @@ def accuracy(input, label, k=1, correct=None, total=None):
 
             #[array([0.], dtype=float32)]
     """
-    if in_dygraph_mode():
+    if _non_static_mode():
         if correct is None:
             correct = _varbase_creator(dtype="int32")
         if total is None:
             total = _varbase_creator(dtype="int32")
 
-        topk_out, topk_indices = nn.topk(input, k=k)
-        _acc, _, _ = core.ops.accuracy(topk_out, topk_indices, label, correct,
-                                       total)
+        _k = k.numpy().item(0) if isinstance(k, Variable) else k
+        topk_out, topk_indices = _C_ops.top_k_v2(input, 'k', _k, 'sorted',
+                                                 False)
+        _acc, _, _ = _C_ops.accuracy(topk_out, topk_indices, label, correct,
+                                     total)
         return _acc
 
     helper = LayerHelper("accuracy", **locals())
     check_variable_and_dtype(input, 'input', ['float16', 'float32', 'float64'],
                              'accuracy')
-    topk_out, topk_indices = nn.topk(input, k=k)
+    topk_out = helper.create_variable_for_type_inference(dtype=input.dtype)
+    topk_indices = helper.create_variable_for_type_inference(dtype="int64")
+    inputs = {"X": [input]}
+    if isinstance(k, Variable):
+        inputs['K'] = [k]
+    else:
+        attrs = {'k': k}
+    attrs['sorted'] = False
+    helper.append_op(
+        type="top_k_v2",
+        inputs=inputs,
+        attrs=attrs,
+        outputs={"Out": [topk_out],
+                 "Indices": [topk_indices]})
     acc_out = helper.create_variable_for_type_inference(dtype="float32")
     if correct is None:
         correct = helper.create_variable_for_type_inference(dtype="int32")

@@ -13,7 +13,9 @@
 # limitations under the License.
 from ..runtime.collective_runtime import CollectiveRuntime
 from ..runtime.parameter_server_runtime import ParameterServerRuntime
-from ..runtime.the_one_ps import TheOnePSRuntime
+from ...ps.the_one_ps import TheOnePSRuntime
+
+__all__ = []
 
 
 class RuntimeFactory(object):

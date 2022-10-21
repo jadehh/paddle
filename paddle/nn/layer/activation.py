@@ -14,48 +14,70 @@
 
 # TODO: define activation functions of neural network
 
-__all__ = [
-    'ELU',
-    'GELU',
-    'Hardshrink',
-    'Hardswish',
-    'Tanh',
-    'Hardtanh',
-    'PReLU',
-    'ReLU',
-    'ReLU6',
-    'SELU',
-    'LeakyReLU',
-    'Sigmoid',
-    'Hardsigmoid',
-    'Softmax',
-    'Softplus',
-    'Softshrink',
-    'Softsign',
-    'Swish',
-    'Tanhshrink',
-    'ThresholdedReLU',
-    'LogSigmoid',
-    'LogSoftmax',
-    'Maxout',
-]
-
-from ...fluid.dygraph import layers
-from ...fluid import core
-from ...fluid.framework import in_dygraph_mode
-from ...fluid.param_attr import ParamAttr
-from ...fluid.initializer import Constant
+from ...framework import ParamAttr
+from ..initializer import Constant
 from paddle.framework import get_default_dtype
 from .. import functional as F
+from paddle.nn import Layer
+
+__all__ = []
 
 
-class ELU(layers.Layer):
+class CELU(Layer):
+    r"""
+    CELU Activation.
+
+    .. math::
+    
+        CELU(x) = max(0, x) + min(0, \alpha * (e^{x/\alpha}-1))
+
+    Parameters:
+        alpha (float, optional): The 'alpha' value of the CELU formulation. Default is 1.0.
+        name (str, optional): Name for the operation (optional, default is None).
+            For more information, please refer to :ref:`api_guide_Name`.
+
+    Shape:
+        - input: Tensor with any shape.
+        - output: Tensor with the same shape as input.
+
+    Examples:
+        .. code-block:: python
+
+            import paddle
+            
+            x = paddle.to_tensor([[-1. ,6.], [1., 15.6]])
+            m = paddle.nn.CELU(0.2)
+            out = m(x)
+            # [[-0.19865242,  6.        ],
+            #  [ 1.        , 15.60000038]]
+    """
+
+    def __init__(self, alpha=1.0, name=None):
+        super(CELU, self).__init__()
+        self._alpha = alpha
+        self._name = name
+
+    def forward(self, x):
+        return F.celu(x, self._alpha, self._name)
+
+    def extra_repr(self):
+        name_str = ', name={}'.format(self._name) if self._name else ''
+        return 'alpha={}{}'.format(self._alpha, name_str)
+
+
+class ELU(Layer):
     r"""
     ELU Activation.
 
     .. math::
 
-        ELU(x) = max(0, x) + min(0, \\alpha * (e^{x}-1))
+        ELU(x)=
+            \left\{
+                \begin{array}{lcl}
+                x,& &\text{if } \ x > 0 \\
+                alpha * (e^{x} - 1),& &\text{if } \ x <= 0
+                \end{array}
+            \right.
 
     Parameters:
         alpha (float, optional): The 'alpha' value of the ELU formulation. Default is 1.0.
@@ -91,7 +113,7 @@ class ELU(layers.Layer):
         return 'alpha={}{}'.format(self._alpha, name_str)
 
 
-class GELU(layers.Layer):
+class GELU(Layer):
     r"""
     GELU Activation.
 
@@ -99,13 +121,13 @@ class GELU(layers.Layer):
 
     .. math::
 
-        GELU(x) = 0.5 * x * (1 + tanh(\\sqrt{\\frac{2}{\\pi}} * (x + 0.044715x^{3})))
+        GELU(x) = 0.5 * x * (1 + tanh(\sqrt{\frac{2}{\pi}} * (x + 0.044715x^{3})))
 
     else
 
     .. math::
 
-        GELU(x) = 0.5 * x * (1 + erf(\\frac{x}{\\sqrt{2}}))
+        GELU(x) = 0.5 * x * (1 + erf(\frac{x}{\sqrt{2}}))
 
     Parameters:
         approximate (bool, optional): Wether to enable approximation. Default is False.
@@ -144,20 +166,20 @@ class GELU(layers.Layer):
         return 'approximate={}{}'.format(self._approximate, name_str)
 
 
-class Hardshrink(layers.Layer):
+class Hardshrink(Layer):
     r"""
     Hardshrink Activation
 
     .. math::
 
         hardshrink(x)=
-            \\left\\{
-            \\begin{aligned}
-            &x, & & if \\ x > threshold \\\\
-            &x, & & if \\ x < -threshold \\\\
-            &0, & & if \\ others
-            \\end{aligned}
-            \\right.
+            \left\{
+                \begin{array}{rcl}
+                    x, & & if \ x > threshold \\
+                    x, & & if \ x < -threshold \\
+                    0, & & if \ others
+            \end{array}
+            \right.
 
     Parameters:
         threshold (float, optional): The value of threshold for hardthrink. Default is 0.5
@@ -192,7 +214,7 @@ class Hardshrink(layers.Layer):
         return 'threshold={}{}'.format(self._threshold, name_str)
 
 
-class Hardswish(layers.Layer):
+class Hardswish(Layer):
     r"""
     Hardswish activation
 
@@ -203,13 +225,14 @@ class Hardswish(layers.Layer):
     .. math::
 
         Hardswish(x)=
-            \\left\\{
-            \\begin{aligned}
-            &0, & & \\text{if } x \\leq -3 \\\\
-            &x, & & \\text{if } x \\geq 3 \\\\
-            &\\frac{x(x+3)}{6}, & & \\text{otherwise}
-            \\end{aligned}
-            \\right.
+            \left\{
+                \begin{array}{cll}
+                0 &, & \text{if } x \leq -3 \\
+                x &, & \text{if } x \geq 3 \\
+                \frac{x(x+3)}{6} &, & \text{otherwise}
+                \end{array}
+            \right.
+            
 
     Parameters:
         name (str, optional): Name for the operation (optional, default is None).
@@ -242,12 +265,12 @@ class Hardswish(layers.Layer):
         return name_str
 
 
-class Tanh(layers.Layer):
+class Tanh(Layer):
     r"""
     Tanh Activation.
 
     .. math::
-        Tanh(x) = \\frac{e^{x} - e^{-x}}{e^{x} + e^{-x}}
+        Tanh(x) = \frac{e^{x} - e^{-x}}{e^{x} + e^{-x}}
 
     Parameters:
         name (str, optional): Name for the operation (optional, default is None).
@@ -283,17 +306,21 @@ class Tanh(layers.Layer):
         return name_str
 
 
-class Hardtanh(layers.Layer):
+class Hardtanh(Layer):
     r"""
     Hardtanh Activation
 
     .. math::
 
-        Hardtanh(x)= \\begin{cases}
-                        max, \\text{if } x > max \\\\
-                        min, \\text{if } x < min \\\\
-                        x,  \\text{otherwise}
-                      \\end{cases}
+        Hardtanh(x)=
+            \left\{
+                \begin{array}{cll}
+                    max,& & \text{if } x > max \\
+                    min,& & \text{if } x < min \\
+                    x,& & \text{otherwise}
+                \end{array}
+            \right.
+
 
     Parameters:
         min (float, optional): The value of min for Hardtanh. Default is -1.
@@ -329,7 +356,7 @@ class Hardtanh(layers.Layer):
         return 'min={}, max={}{}'.format(self._min, self._max, name_str)
 
 
-class PReLU(layers.Layer):
+class PReLU(Layer):
     """
     PReLU Activation.
 
@@ -347,6 +374,8 @@ class PReLU(layers.Layer):
             Default is None. For more information, please refer to :ref:`api_paddle_ParamAttr`.
         name (str, optional): Name for the operation (optional, default is None).
             For more information, please refer to :ref:`api_guide_Name`.
+        data_format(str, optional): Data format that specifies the layout of input.
+            It may be "NC", "NCL", "NCHW", "NCDHW", "NLC", "NHWC" or "NDHWC". Default: "NCHW".
 
     Shape:
         - input: Tensor with any shape. Default dtype is float32.
@@ -377,13 +406,18 @@ class PReLU(layers.Layer):
             #    [ 6.  ,  7.  ,  8.  ,  9.  ]]]]
     """
 
-    def __init__(self, num_parameters=1, init=0.25, weight_attr=None,
+    def __init__(self,
+                 num_parameters=1,
+                 init=0.25,
+                 weight_attr=None,
+                 data_format="NCHW",
                  name=None):
         super(PReLU, self).__init__()
         self._num_parameters = num_parameters
         self._init = init
         self._weight_attr = weight_attr
         self._name = name
+        self._data_format = data_format
 
         self._weight = self.create_parameter(
             attr=self._weight_attr,
@@ -393,15 +427,16 @@ class PReLU(layers.Layer):
             default_initializer=Constant(self._init))
 
     def forward(self, x):
-        return F.prelu(x, self._weight)
+        return F.prelu(x, self._weight, data_format=self._data_format)
 
     def extra_repr(self):
         name_str = ', name={}'.format(self._name) if self._name else ''
-        return 'num_parameters={}, init={}, dtype={}{}'.format(
-            self._num_parameters, self._init, self._dtype, name_str)
+        return 'num_parameters={}, data_format={}, init={}, dtype={}{}'.format(
+            self._num_parameters, self._data_format, self._init, self._dtype,
+            name_str)
 
 
-class ReLU(layers.Layer):
+class ReLU(Layer):
     """
     ReLU Activation.
 
@@ -439,7 +474,7 @@ class ReLU(layers.Layer):
         return name_str
 
 
-class ReLU6(layers.Layer):
+class ReLU6(Layer):
     """
     ReLU6 Activation
 
@@ -478,17 +513,19 @@ class ReLU6(layers.Layer):
         return name_str
 
 
-class SELU(layers.Layer):
+class SELU(Layer):
     r"""
     SELU Activation
 
     .. math::
 
         SELU(x)= scale *
-                 \\begin{cases}
-                   x, \\text{if } x > 0 \\\\
-                   alpha * e^{x} - alpha, \\text{if } x <= 0
-                 \\end{cases}
+            \left\{
+                \begin{array}{lcl}
+                x,& &\text{if } \ x > 0 \\
+                alpha * e^{x} - alpha,& &\text{if } \ x <= 0
+                \end{array}
+            \right.
 
     Parameters:
         scale (float, optional): The value of scale(must be greater than 1.0) for SELU. Default is 1.0507009873554804934193349852946
@@ -529,19 +566,20 @@ class SELU(layers.Layer):
                                                        name_str)
 
 
-class LeakyReLU(layers.Layer):
+class LeakyReLU(Layer):
     r"""
     Leaky ReLU Activation.
 
     .. math::
 
         LeakyReLU(x)=
-            \\left\\{
-            \\begin{aligned}
-            &x, & & if \\ x >= 0 \\\\
-            &negative\_slope * x, & & otherwise \\\\
-            \\end{aligned}
-            \\right. \\\\
+            \left\{
+                \begin{array}{rcl}
+                    x, & & if \ x >= 0 \\
+                    negative\_slope * x, & & otherwise \\
+                \end{array}
+            \right.
+
 
     Parameters:
         negative_slope (float, optional): Slope of the activation function at
@@ -577,7 +615,7 @@ class LeakyReLU(layers.Layer):
         return 'negative_slope={}{}'.format(self._negative_slope, name_str)
 
 
-class Sigmoid(layers.Layer):
+class Sigmoid(Layer):
     """
     this interface is used to construct a callable object of the ``Sigmoid`` class. This layer calcluate the `sigmoid` of input x.
 
@@ -617,7 +655,7 @@ class Sigmoid(layers.Layer):
         return name_str
 
 
-class Hardsigmoid(layers.Layer):
+class Hardsigmoid(Layer):
     r"""
     This interface is used to construct a callable object of the ``Hardsigmoid`` class.
     This layer calcluate the `hardsigmoid` of input x.
@@ -628,13 +666,14 @@ class Hardsigmoid(layers.Layer):
     .. math::
 
         Hardsigmoid(x)=
-            \\left\\{
-            \\begin{aligned}
-            &0, & & \\text{if } x \\leq -3 \\\\
-            &1, & & \\text{if } x \\geq 3 \\\\
-            &x/6 + 1/2, & & \\text{otherwise}
-            \\end{aligned}
-            \\right.
+            \left\{
+                \begin{array}{rcl}
+            0, & & \text{if } \ x \leq -3 \\
+            1, & & \text{if } \ x \geq 3 \\
+            x/6 + 1/2, & & \text{otherwise}
+                \end{array}
+            \right.
+
 
     Parameters:
         name (str, optional): Name for the operation (optional, default is None). For more information, please refer to :ref:`api_guide_Name`.
@@ -668,14 +707,14 @@ class Hardsigmoid(layers.Layer):
         return name_str
 
 
-class Softplus(layers.Layer):
+class Softplus(Layer):
     r"""
     Softplus Activation
 
     .. math::
 
-        Softplus(x) = \\frac{1}{beta} * \\log(1 + e^{beta * x}) \\\\
-        \\text{For numerical stability, the implementation reverts to the linear function when: beta * x > threshold.}
+        Softplus(x) = \frac{1}{beta} * \log(1 + e^{beta * x}) \\
+        \text{For numerical stability, the implementation reverts to the linear function when: beta * x > threshold.}
 
     Parameters:
         beta (float, optional): The value of beta for Softplus. Default is 1
@@ -713,17 +752,21 @@ class Softplus(layers.Layer):
                                                 name_str)
 
 
-class Softshrink(layers.Layer):
+class Softshrink(Layer):
     r"""
     Softshrink Activation
 
     .. math::
 
-        Softshrink(x)= \\begin{cases}
-                        x - threshold, \\text{if } x > threshold \\\\
-                        x + threshold, \\text{if } x < -threshold \\\\
-                        0,  \\text{otherwise}
-                      \\end{cases}
+        Softshrink(x)=
+            \left\{
+                \begin{array}{rcl}
+                x - threshold,& & \text{if } x > threshold \\
+                x + threshold,& & \text{if } x < -threshold \\
+                0,& &  \text{otherwise}
+            \end{array}
+            \right.
+
 
     Parameters:
         threshold (float, optional): The value of threshold(must be no less than zero) for softplus. Default is 0.5
@@ -758,13 +801,13 @@ class Softshrink(layers.Layer):
         return 'threshold={}{}'.format(self._threshold, name_str)
 
 
-class Softsign(layers.Layer):
+class Softsign(Layer):
     r"""
     Softsign Activation
 
     .. math::
 
-        Softsign(x) = \\frac{x}{1 + |x|}
+        Softsign(x) = \frac{x}{1 + |x|}
 
     Parameters:
         name (str, optional): Name for the operation (optional, default is None).
@@ -797,13 +840,13 @@ class Softsign(layers.Layer):
         return name_str
 
 
-class Swish(layers.Layer):
+class Swish(Layer):
     r"""
     Swish Activation.
 
     .. math::
 
-        Swish(x) = \\frac{x}{1 + e^{-x}}
+        Swish(x) = \frac{x}{1 + e^{-x}}
 
     Parameters:
         name (str, optional): Name for the operation (optional, default is None).
@@ -836,7 +879,52 @@ class Swish(layers.Layer):
         return name_str
 
 
-class Tanhshrink(layers.Layer):
+class Mish(Layer):
+    r"""
+    Mish Activation.
+
+    ..  math::
+
+        softplus(x) = \begin{cases}
+                x, \text{if } x > \text{threshold} \\
+                \ln(1 + e^{x}),  \text{otherwise}
+            \end{cases}
+
+        Mish(x) = x * \tanh(softplus(x))
+    
+    Parameters:
+        name (str, optional): Name for the operation (optional, default is None).
+            For more information, please refer to :ref:`api_guide_Name`.
+
+    Shape:
+        - input: Tensor with any shape.
+        - output: Tensor with the same shape as input.
+    
+    Examples:
+
+        .. code-block:: python
+
+            import paddle
+
+            x = paddle.to_tensor([-5., 0., 5.])
+            m = paddle.nn.Mish()
+            out = m(x) # [-0.03357624, 0., 4.99955208]
+
+    """
+
+    def __init__(self, name=None):
+        super(Mish, self).__init__()
+        self._name = name
+
+    def forward(self, x):
+        return F.mish(x, self._name)
+
+    def extra_repr(self):
+        name_str = 'name={}'.format(self._name) if self._name else ''
+        return name_str
+
+
+class Tanhshrink(Layer):
     """
     Tanhshrink Activation
 
@@ -875,16 +963,20 @@ class Tanhshrink(layers.Layer):
         return name_str
 
 
-class ThresholdedReLU(layers.Layer):
+class ThresholdedReLU(Layer):
     r"""
     Thresholded ReLU Activation
 
     .. math::
 
-        ThresholdedReLU(x) = \\begin{cases}
-                               x, \\text{if } x > threshold \\\\
-                               0, \\text{otherwise}
-                              \\end{cases}
+        ThresholdedReLU(x) =
+            \left\{
+                \begin{array}{rl}
+                x,& \text{if } \ x > threshold \\
+                0,& \text{otherwise}
+                \end{array}
+            \right.
+
 
     Parameters:
         threshold (float, optional): The value of threshold for ThresholdedReLU. Default is 1.0
@@ -919,13 +1011,51 @@ class ThresholdedReLU(layers.Layer):
         return 'threshold={}{}'.format(self._threshold, name_str)
 
 
-class LogSigmoid(layers.Layer):
+class Silu(Layer):
+    """
+    Silu Activation.
+    .. math::
+
+        Silu(x) = \frac{x}{1 + e^{-x}}
+
+    Parameters:
+        x (Tensor): The input Tensor with data type float32, or float64.
+        name (str, optional): Name for the operation (optional, default is None).
+            For more information, please refer to :ref:`api_guide_Name`.
+
+    Shape:
+        - input: Tensor with any shape.
+        - output: Tensor with the same shape as input.
+
+    Examples:
+        .. code-block:: python
+
+            import paddle
+
+            x = paddle.to_tensor([1.0, 2.0, 3.0, 4.0])
+            m = paddle.nn.Silu()
+            out = m(x) # [ 0.731059, 1.761594, 2.857722, 3.928055 ]
+    """
+
+    def __init__(self, name=None):
+        super(Silu, self).__init__()
+        self._name = name
+
+    def forward(self, x):
+        return F.silu(x, self._name)
+
+    def extra_repr(self):
+        name_str = 'name={}'.format(self._name) if self._name else ''
+        return name_str
+
+
+class LogSigmoid(Layer):
     r"""
     LogSigmoid Activation.
 
     .. math::
 
-        LogSigmoid(x) = log \\frac{1}{1 + e^{-x}}
+        LogSigmoid(x) = log \frac{1}{1 + e^{-x}}
 
     Parameters:
         x (Tensor): The input Tensor with data type float32, or float64.
@@ -958,7 +1088,7 @@ class LogSigmoid(layers.Layer):
         return name_str
 
 
-class Softmax(layers.Layer):
+class Softmax(Layer):
     r"""
     Softmax Activation.
 
@@ -987,7 +1117,7 @@ class Softmax(layers.Layer):
 
     .. math::
 
-        Softmax[i, j] = \\frac{\\exp(x[i, j])}{\\sum_j(exp(x[i, j])}
+        Softmax[i, j] = \frac{\exp(x[i, j])}{\sum_j(exp(x[i, j])}
 
     Example:
 
@@ -1085,16 +1215,16 @@ class Softmax(layers.Layer):
         return 'axis={}{}'.format(self._axis, name_str)
 
 
-class LogSoftmax(layers.Layer):
+class LogSoftmax(Layer):
     r"""
     This operator implements the log_softmax layer. The calculation process is as follows:
 
     .. math::
 
-        \\begin{aligned} 
-        Out[i, j] &= log(softmax(x)) \\\\
-        &= log(\\frac{\\exp(X[i, j])}{\\sum_j(\\exp(X[i, j])})
-        \\end{aligned}
+        \begin{array} {rcl}
+            Out[i, j] &= &log(softmax(x)) \\
+            &= &log(\frac{\exp(X[i, j])}{\sum_j(\exp(X[i, j])})
+        \end{array}
 
     Parameters:
         axis (int, optional): The axis along which to perform log_softmax
@@ -1143,7 +1273,7 @@ class LogSoftmax(layers.Layer):
         return 'axis={}{}'.format(self._axis, name_str)
 
 
-class Maxout(layers.Layer):
+class Maxout(Layer):
     r"""
     Maxout Activation.
 
@@ -1153,12 +1283,14 @@ class Maxout(layers.Layer):
 
     .. math::
 
-        &out_{si+j} = \max_{k} x_{gsi + sk + j} \\\\
-        &g = groups \\\\
-        &s = \\frac{input.size}{num\\_channels} \\\\
-        &0 \\le i < \\frac{num\\_channels}{groups} \\\\
-        &0 \\le j < s \\\\
-        &0 \\le k < groups
+        \begin{array}{l}
+            &out_{si+j} = \max_{k} x_{gsi + sk + j} \\
+            &g = groups \\
+            &s = \frac{input.size}{num\_channels} \\
+            &0 \le i < \frac{num\_channels}{groups} \\
+            &0 \le j < s \\
+            &0 \le k < groups
+        \end{array}
 
     Parameters:
         groups (int, optional): The groups number of maxout. `groups` specifies the

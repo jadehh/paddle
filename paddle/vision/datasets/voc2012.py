@@ -23,7 +23,7 @@ import paddle
 from paddle.io import Dataset
 from paddle.dataset.common import _check_exists_and_download
 
-__all__ = ["VOC2012"]
+__all__ = []
 
 VOC_URL = 'https://dataset.bj.bcebos.com/voc/VOCtrainval_11-May-2012.tar'
 
@@ -69,7 +69,6 @@ class VOC2012(Dataset):
                 def forward(self, image, label):
                     return paddle.sum(image), label
 
-            paddle.disable_static()
 
             normalize = Normalize(mean=[0.5, 0.5, 0.5],
                                   std=[0.5, 0.5, 0.5],
