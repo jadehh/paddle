@@ -1,4 +1,4 @@
-# paddle v2.3.2-gpu-win-py3.6
+# paddle v2.3.2-gpu-win-py3.6 112
 
 ## 1．打包为wheel文件
 
