@@ -10,7 +10,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="paddle",
-    version="1.8",
+    version="1.7.2",
     keywords=("pip", "paddle", ""),
     description="paddle",
     long_description="xxx",
