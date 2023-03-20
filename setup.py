@@ -9,12 +9,15 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="paddle",
-    version="2.1",
+    name="paddle-gpu-clean",
+    version="2.1.0",
     keywords=("pip", "paddle", ""),
     description="paddle",
     long_description="xxx",
     license="MIT Licence",
+    classifiers=[
+       "Operating System :: POSIX :: Linux",  # 编程语言
+    ],
 
     url="https://jadehh@live.com",
     author="jade",

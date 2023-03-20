@@ -1,5 +1,4 @@
-# paddle V2.1
-
+# paddle-gpu-clean
 ## 1．打包为wheel文件
 
 安装wheel
@@ -8,6 +7,6 @@ pip install wheel
 ```
 打包wheel
 ```bash
-pip wheel --wheel-dir=./wheel_dir ./
+python setup.py sdist bdist_wheel
 ```
 > wheel-dir 为wheel 输出文件夹，后面接项目文件夹（即包含setup.py的文件夹）
